@@ -612,13 +612,18 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
 
           if (stack.active_task_id) {
             // Active task exists → all new tasks append to ready queue
+            const activeTasks = replayEvents(dir);
+            const activeTask = getTask(activeTasks, stack.active_task_id);
             stack.ready_tasks = [...stack.ready_tasks, ...created];
             writeStack(dir, stack);
             return [
-              `✅ ${created.length} 个任务已追加到队列：`,
+              `📋 ${created.length} 个任务已加入队列（待确认）：`,
               ...created.map((t) => `  ⏳ ${t.id}: ${t.title}`),
               ``,
-              `当前任务完成后会自动推进。`,
+              `⚠️  当前主线任务仍在进行：${activeTask?.title ?? stack.active_task_id}`,
+              `👉 建议：先调用 pcp_done 关闭当前任务，队列将自动推进；`,
+              `   或继续完成当前任务后让队列自然推进。`,
+              `   【不要】用 pcp_sub 手动重复执行队列中的任务。`,
             ].join("\n");
           }
 
