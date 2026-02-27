@@ -8,7 +8,7 @@ Solves two problems:
 
 ## Architecture
 
-![PCP Architecture](docs/architecture.png)
+![PCP Architecture](docs/architecture.svg)
 
 ## Install
 
