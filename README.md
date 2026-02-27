@@ -6,6 +6,10 @@ Solves two problems:
 1. **Lost main thread** — agent wanders off mid-task, forgets what it was doing
 2. **Scope creep** — user adds "oh also do X" mid-sprint, derailing current work
 
+## Architecture
+
+![PCP Architecture](docs/architecture.png)
+
 ## Install
 
 ```bash
@@ -16,11 +20,21 @@ Then load the `pcp-setup` skill in OpenCode to complete installation:
 
 > In OpenCode chat: *"Load skill pcp-setup and run it"*
 
+## Compatibility
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| **OpenCode** | ✅ Full support | Plugin + auto hooks + context injection |
+| Claude Code | 🔜 Planned | Skills work manually; auto-hooks need adapter |
+| Cursor / Cline / others | 🔜 Planned | Skills work manually; plugin needs porting |
+
+> The core concepts (task queue, backlog, pivot) are tool-agnostic. The `pcp.ts` plugin currently uses the OpenCode plugin SDK. Adapters for other tools are welcome via PR.
+
 ## What You Get
 
 | Component | Type | Purpose |
 |-----------|------|---------|
-| `pcp.ts` | Plugin | 11 tools + auto-lifecycle hooks + universal context injection |
+| `pcp.ts` | Plugin | 12 tools + auto-lifecycle hooks + universal context injection |
 | `pcp-intake` | Skill | Onboard an existing project into PCP (5-step guided flow) |
 | `pcp-sprint-review` | Skill | End-of-sprint backlog review (one-question-at-a-time) |
 | `pcp-setup` | Skill | Install all PCP components in 30 seconds |
@@ -45,11 +59,11 @@ User: "also add OAuth later"
 Agent: calls pcp_capture("Add OAuth") → "Captured to backlog [B001], continuing sprint."
 ```
 
-### Adding new requirements mid-queue
+### Mid-task pivot
 ```
-User has new dev requirements between tasks
-  → Goes through planner → new todolist
-  → pcp_plan(new_tasks) → T006..T008 appended to queue
+User: "actually, let's generate the news draft directly instead"
+Agent: detects pivot signal → confirms → pcp_pivot("more efficient approach", new_task="Generate news draft")
+  → T002 marked as pivoted (with reason), T003 starts immediately
 ```
 
 ### Backlog review
@@ -68,6 +82,7 @@ Agent: pcp_promote("B001") → added as subtask T006
 | `pcp_start` | Start a sprint manually with custom title |
 | `pcp_sub` | Push a subtask onto the stack |
 | `pcp_done` | Close current task (auto-advances to next in queue) |
+| `pcp_pivot` | Abandon current task with reason, start new direction |
 | `pcp_status` | Show current task, queue, and backlog |
 | `pcp_capture` | Add item to backlog (do not execute now) |
 | `pcp_backlog` | List all pending backlog items |
