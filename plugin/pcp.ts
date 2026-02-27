@@ -1,0 +1,1126 @@
+import { tool } from "@opencode-ai/plugin";
+import type { Plugin } from "@opencode-ai/plugin";
+import * as fs from "fs";
+import * as path from "path";
+
+// ──────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────
+
+interface Stack {
+  next_id: number;
+  backlog_next_id: number;
+  active_stack: string[];
+  active_task_id: string | null;
+  ready_tasks: { id: string; title: string }[];
+}
+
+interface PcpEvent {
+  e:
+    | "created"
+    | "sub"
+    | "done"
+    | "pivoted"
+    | "resume_set"
+    | "project_context"
+    | "backlog_add"
+    | "backlog_promote"
+    | "backlog_dismiss";
+  id?: string;
+  type?: "main" | "sub";
+  title?: string;
+  parent?: string;
+  prompt?: string;
+  summary?: string;
+  detail?: string;
+  reason?: string;
+  backlog_id?: string;
+  task_id?: string;
+  ts: number;
+}
+
+interface Task {
+  id: string;
+  type: "main" | "sub";
+  title: string;
+  parent?: string;
+  done: boolean;
+  resume_prompt?: string;
+}
+
+interface BacklogItem {
+  id: string;
+  title: string;
+  detail?: string;
+  status: "pending" | "promoted" | "dismissed";
+  promoted_to?: string;
+}
+
+// ──────────────────────────────────────────────
+// Data layer
+// ──────────────────────────────────────────────
+
+function pcpDir(dir: string): string {
+  return path.join(dir, ".opencode", "pcp");
+}
+
+function ensureDir(dir: string): void {
+  const d = pcpDir(dir);
+  if (!fs.existsSync(d)) {
+    fs.mkdirSync(d, { recursive: true });
+  }
+}
+
+function readStack(dir: string): Stack {
+  const p = path.join(pcpDir(dir), "stack.json");
+  if (!fs.existsSync(p)) {
+    return { next_id: 1, backlog_next_id: 1, active_stack: [], active_task_id: null, ready_tasks: [] };
+  }
+  try {
+    const s = JSON.parse(fs.readFileSync(p, "utf8")) as Stack;
+    if (s.backlog_next_id === undefined) s.backlog_next_id = 1; // migrate old stacks
+    if (s.ready_tasks === undefined) s.ready_tasks = []; // migrate old stacks
+    return s;
+  } catch {
+    return { next_id: 1, backlog_next_id: 1, active_stack: [], active_task_id: null, ready_tasks: [] };
+  }
+}
+
+function writeStack(dir: string, s: Stack): void {
+  fs.writeFileSync(
+    path.join(pcpDir(dir), "stack.json"),
+    JSON.stringify(s, null, 2),
+  );
+}
+
+function appendEvent(dir: string, event: PcpEvent): void {
+  fs.appendFileSync(
+    path.join(pcpDir(dir), "events.jsonl"),
+    JSON.stringify(event) + "\n",
+  );
+}
+
+function replayEvents(dir: string): Task[] {
+  const p = path.join(pcpDir(dir), "events.jsonl");
+  if (!fs.existsSync(p)) return [];
+
+  const tasks = new Map<string, Task>();
+
+  for (const line of fs
+    .readFileSync(p, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)) {
+    try {
+      const event = JSON.parse(line) as PcpEvent;
+      if (event.e === "created" && event.id) {
+        tasks.set(event.id, {
+          id: event.id,
+          type: event.type ?? "main",
+          title: event.title ?? "",
+          done: false,
+        });
+      } else if (event.e === "sub" && event.id) {
+        tasks.set(event.id, {
+          id: event.id,
+          type: "sub",
+          title: event.title ?? "",
+          parent: event.parent,
+          done: false,
+        });
+      } else if ((event.e === "done" || event.e === "pivoted") && event.id) {
+        const task = tasks.get(event.id);
+        if (task) {
+          task.done = true;
+          if (event.e === "pivoted") (task as any).pivoted = true;
+          if (event.reason) (task as any).pivot_reason = event.reason;
+        }
+      } else if (event.e === "resume_set" && event.id) {
+        const task = tasks.get(event.id);
+        if (task) task.resume_prompt = event.prompt;
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+
+  return Array.from(tasks.values());
+}
+
+function replayBacklog(dir: string): BacklogItem[] {
+  const p = path.join(pcpDir(dir), "events.jsonl");
+  if (!fs.existsSync(p)) return [];
+
+  const items = new Map<string, BacklogItem>();
+
+  for (const line of fs
+    .readFileSync(p, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)) {
+    try {
+      const event = JSON.parse(line) as PcpEvent;
+      if (event.e === "backlog_add" && event.id) {
+        items.set(event.id, {
+          id: event.id,
+          title: event.title ?? "",
+          detail: event.detail,
+          status: "pending",
+        });
+      } else if (event.e === "backlog_promote" && event.backlog_id) {
+        const item = items.get(event.backlog_id);
+        if (item) {
+          item.status = "promoted";
+          item.promoted_to = event.task_id;
+        }
+      } else if (event.e === "backlog_dismiss" && event.backlog_id) {
+        const item = items.get(event.backlog_id);
+        if (item) item.status = "dismissed";
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  return Array.from(items.values());
+}
+
+function getPendingBacklog(dir: string): BacklogItem[] {
+  return replayBacklog(dir).filter((item) => item.status === "pending");
+}
+
+function getTask(tasks: Task[], id: string): Task | undefined {
+  return tasks.find((t) => t.id === id);
+}
+
+function readProjectContext(dir: string): string | null {
+  const p = path.join(pcpDir(dir), "events.jsonl");
+  if (!fs.existsSync(p)) return null;
+
+  let latest: string | null = null;
+  for (const line of fs
+    .readFileSync(p, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)) {
+    try {
+      const event = JSON.parse(line) as PcpEvent;
+      if (event.e === "project_context" && event.summary) {
+        latest = event.summary;
+      }
+    } catch {}
+  }
+  return latest;
+}
+
+// ──────────────────────────────────────────────
+// Project scanner (for pcp_init)
+// ──────────────────────────────────────────────
+
+function tryRead(p: string, maxChars = 400): string | null {
+  try {
+    if (!fs.existsSync(p)) return null;
+    return fs.readFileSync(p, "utf8").trim().slice(0, maxChars);
+  } catch {
+    return null;
+  }
+}
+
+function scanProject(dir: string): { summary: string; detail: string } {
+  const facts: string[] = [];
+  const detail: string[] = [];
+
+  const pkg = tryRead(path.join(dir, "package.json"));
+  if (pkg) {
+    try {
+      const p = JSON.parse(pkg);
+      if (p.name) facts.push(p.name);
+      if (p.description) facts.push(p.description);
+      const deps = { ...p.dependencies, ...p.devDependencies };
+      const frameworks = ["next", "react", "vue", "svelte", "express", "fastify", "hono"]
+        .filter((f) => deps?.[f] || deps?.[`@${f}/core`]);
+      if (frameworks.length) facts.push(`(${frameworks.join(", ")})`);
+    } catch {}
+  }
+
+  for (const manifest of [
+    ["pyproject.toml", /^name\s*=\s*"(.+)"/m, /^description\s*=\s*"(.+)"/m],
+    ["go.mod", /^module\s+(\S+)/m, null],
+    ["Cargo.toml", /^name\s*=\s*"(.+)"/m, /^description\s*=\s*"(.+)"/m],
+  ] as [string, RegExp, RegExp | null][]) {
+    const content = tryRead(path.join(dir, manifest[0]));
+    if (content) {
+      const name = manifest[1]?.exec(content)?.[1];
+      const desc = manifest[2]?.exec(content)?.[1];
+      if (name) facts.push(name);
+      if (desc) facts.push(desc);
+    }
+  }
+
+  for (const name of ["README.md", "README.rst", "README.txt", "README"]) {
+    const content = tryRead(path.join(dir, name), 800);
+    if (!content) continue;
+    const paragraphs = content
+      .replace(/^#+.*/gm, "")
+      .replace(/!\[.*?\]\(.*?\)/g, "")
+      .split(/\n\n+/)
+      .map((p) => p.replace(/\n/g, " ").trim())
+      .filter((p) => p.length > 20 && !p.startsWith("```"));
+    if (paragraphs[0]) {
+      detail.push(`README: ${paragraphs[0].slice(0, 200)}`);
+    }
+    break;
+  }
+
+  const claudeMd = tryRead(path.join(dir, "CLAUDE.md"), 500);
+  if (claudeMd) {
+    const firstPara = claudeMd
+      .split(/\n\n+/)
+      .find((p) => p.trim().length > 20 && !p.startsWith("#"));
+    if (firstPara) detail.push(`CLAUDE.md: ${firstPara.trim().slice(0, 150)}`);
+  }
+
+  const entries = [
+    "src/index.ts", "src/main.ts", "src/app.ts",
+    "src/index.tsx", "app/page.tsx", "pages/index.tsx",
+    "src/main.py", "main.py", "app.py",
+    "main.go", "cmd/main.go",
+    "src/main.rs", "src/lib.rs",
+  ].filter((e) => fs.existsSync(path.join(dir, e)));
+  if (entries.length) detail.push(`入口: ${entries.slice(0, 3).join(", ")}`);
+
+  const summary = facts.filter(Boolean).join(" ").slice(0, 100) || path.basename(dir);
+  return { summary, detail: detail.join("\n") };
+}
+
+// ──────────────────────────────────────────────
+// Tool name classifiers
+// ──────────────────────────────────────────────
+
+const WRITE_PATTERNS = ["write", "edit", "patch", "create", "apply", "bash", "shell", "exec", "run"];
+const BASH_PATTERNS  = ["bash", "shell", "exec", "run", "terminal"];
+
+function isWriteTool(name: string): boolean {
+  const n = name.toLowerCase();
+  return WRITE_PATTERNS.some((p) => n.includes(p));
+}
+
+function isBashTool(name: string): boolean {
+  const n = name.toLowerCase();
+  return BASH_PATTERNS.some((p) => n.includes(p));
+}
+
+// ──────────────────────────────────────────────
+// Context builders (token budget: ≤3 / ≤5 lines)
+// ──────────────────────────────────────────────
+
+// PCP behavioral rule — always injected to ALL agents via system.transform
+const PCP_RULE = `[PCP] "以后/顺便/记一下X"→pcp_capture; todolist/计划→pcp_plan(tasks); "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
+
+function buildShortContext(
+  stack: Stack,
+  tasks: Task[],
+  projectCtx: string | null,
+  pendingBacklogCount: number,
+): string {
+  const lines: string[] = [PCP_RULE];
+  const readyCount = stack.ready_tasks.length;
+
+  if (stack.active_task_id) {
+    const active = getTask(tasks, stack.active_task_id);
+    if (active) {
+      if (stack.active_stack.length === 1) {
+        lines.push(`📌 主线: ${active.title} [${active.id}]`);
+      } else {
+        const mainTask = getTask(tasks, stack.active_stack[0]);
+        if (mainTask) lines.push(`📌 主线: ${mainTask.title} [${mainTask.id}]`);
+        lines.push(`⤷ 当前: ${active.title} [${active.id}] (子任务) — git commit 后返回主线`);
+      }
+    }
+    if (readyCount > 0) lines.push(`⏳ 队列: ${readyCount} 个任务待执行`);
+  } else {
+    if (projectCtx) lines.push(`[项目] ${projectCtx.slice(0, 60)}`);
+    if (pendingBacklogCount > 0) {
+      lines.push(`📋 Backlog: ${pendingBacklogCount} 项待回顾 — pcp_backlog 查看`);
+    }
+    lines.push(`💡 无任务 — 建议做plan后pcp_plan加载`);
+  }
+
+  return lines.slice(0, 5).join("\n");
+}
+
+function buildResumeContext(
+  stack: Stack,
+  tasks: Task[],
+  projectCtx: string | null,
+  pendingBacklogCount: number,
+): string {
+  const lines: string[] = [];
+
+  if (projectCtx) {
+    lines.push(`[项目] ${projectCtx.slice(0, 80)}`);
+  }
+
+  if (stack.active_task_id) {
+    lines.push("当前任务栈：");
+    for (let i = 0; i < Math.min(stack.active_stack.length, 3); i++) {
+      const id = stack.active_stack[i];
+      const task = getTask(tasks, id);
+      const isCurrent = id === stack.active_task_id;
+      const prefix = i === 0 ? "[主]" : "[子]";
+      lines.push(
+        `  ${prefix} ${id} ${task?.title ?? id}${isCurrent ? "  ← 当前" : ""}`,
+      );
+    }
+  }
+
+  if (stack.ready_tasks.length > 0) {
+    lines.push(`⏳ 队列: ${stack.ready_tasks.map(t => `${t.id}:${t.title}`).join(", ")}`);
+  }
+
+  if (pendingBacklogCount > 0) {
+    lines.push(`📋 Backlog: ${pendingBacklogCount} 项待回顾`);
+  }
+
+  return lines.slice(0, 6).join("\n");
+}
+
+// ──────────────────────────────────────────────
+// Plugin
+// ──────────────────────────────────────────────
+
+export const PCPPlugin: Plugin = async ({ directory, client }) => {
+  console.log("PCP initialized");
+
+  // ── Session helpers (cached to avoid repeated API calls) ────
+
+  const sessionDirCache = new Map<string, string>();
+
+  async function getSessionDir(sessionID: string): Promise<string> {
+    const cached = sessionDirCache.get(sessionID);
+    if (cached) return cached;
+    try {
+      const resp = await client.session.get({ path: { id: sessionID } });
+      const dir: string = (resp.data as any)?.directory ?? directory;
+      sessionDirCache.set(sessionID, dir);
+      return dir;
+    } catch {
+      return directory;
+    }
+  }
+
+  async function resolveTitle(sessionID: string): Promise<string> {
+    try {
+      const resp = await client.session.get({ path: { id: sessionID } });
+      const title: string = (resp.data as any)?.title?.trim() ?? "";
+      if (title) return title.slice(0, 60);
+
+      const msgsResp = await client.session.messages({ path: { id: sessionID } });
+      const messages: any[] = (msgsResp.data as any) ?? [];
+      const userMsgs = messages.filter((m: any) => m.info?.role === "user");
+      const last = userMsgs[userMsgs.length - 1];
+      if (last) {
+        const text = (last.parts ?? [])
+          .filter((p: any) => p.type === "text" && !p.synthetic)
+          .map((p: any) => p.text ?? "")
+          .join(" ")
+          .trim();
+        if (text) return text.slice(0, 60);
+      }
+    } catch {}
+    return "未命名任务";
+  }
+
+  // ── Auto-lifecycle internals ─────────────────
+
+  function autoCreateTask(dir: string, title: string): void {
+    ensureDir(dir);
+    const stack = readStack(dir);
+    if (stack.active_task_id) return;
+
+    // Auto-advance from ready queue if available
+    if (stack.ready_tasks.length > 0) {
+      const next = stack.ready_tasks.shift()!;
+      stack.active_stack = [next.id];
+      stack.active_task_id = next.id;
+      writeStack(dir, stack);
+      console.log(`[PCP] auto-advanced to ${next.id}: ${next.title}`);
+      return;
+    }
+
+    // No ready tasks → create ad-hoc task
+    const id = `T${String(stack.next_id).padStart(3, "0")}`;
+    appendEvent(dir, { e: "created", id, type: "main", title, ts: Date.now() });
+    stack.active_stack = [id];
+    stack.active_task_id = id;
+    stack.next_id++;
+    writeStack(dir, stack);
+    console.log(`[PCP] auto-started ${id}: ${title}`);
+  }
+
+  function autoDoneTask(dir: string): void {
+    const stack = readStack(dir);
+    if (!stack.active_task_id) return;
+
+    const doneId = stack.active_task_id;
+    appendEvent(dir, { e: "done", id: doneId, ts: Date.now() });
+    stack.active_stack.pop();
+
+    if (stack.active_stack.length > 0) {
+      // Return to parent task (sub-task done)
+      stack.active_task_id = stack.active_stack[stack.active_stack.length - 1];
+    } else if (stack.ready_tasks.length > 0) {
+      // Auto-advance from ready queue
+      const next = stack.ready_tasks.shift()!;
+      stack.active_stack = [next.id];
+      stack.active_task_id = next.id;
+      console.log(`[PCP] auto-advanced to ${next.id}: ${next.title}`);
+    } else {
+      stack.active_task_id = null;
+    }
+
+    writeStack(dir, stack);
+    console.log(`[PCP] auto-done ${doneId} (git commit)`);
+  }
+
+  return {
+    // ── Tools ──────────────────────────────────
+
+    tool: {
+      /**
+       * Scan the project and establish a baseline context.
+       * Call once when first introducing PCP to an existing project.
+       */
+      pcp_init: tool({
+        description:
+          "扫描项目（README、package.json、入口文件等），建立项目基线上下文。" +
+          "首次在现有项目中使用 PCP 时调用一次。之后每次会话都会自动注入此上下文。",
+        args: {
+          extra: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "可选：补充说明（已完成的功能、当前里程碑等），追加到自动扫描结果后",
+            ),
+        },
+        async execute({ extra }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+
+          const { summary, detail } = scanProject(dir);
+          const full = extra ? `${summary}；${extra}` : summary;
+
+          appendEvent(dir, {
+            e: "project_context",
+            summary: full,
+            ts: Date.now(),
+          });
+
+          const lines = [
+            `✅ PCP 项目基线已建立`,
+            ``,
+            `📦 项目摘要：${full}`,
+          ];
+          if (detail) {
+            lines.push(``, `扫描详情：`, ...detail.split("\n").map((l) => `  ${l}`));
+          }
+          lines.push(
+            ``,
+            `此上下文将在每次对话和 compaction 时自动注入。`,
+            `如需更新可再次调用 pcp_init。`,
+          );
+
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_start: tool({
+        description:
+          "开始一个新 sprint（主任务）。写代码会自动开始任务，仅在需要自定义标题时手动调用。" +
+          "若当前已有 sprint 进行中，会提示先 git commit 关闭当前 sprint。",
+        args: {
+          title: tool.schema.string().describe("Sprint 标题"),
+        },
+        async execute({ title }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+
+          // Guard: block if sprint already active
+          if (stack.active_task_id) {
+            const tasks = replayEvents(dir);
+            const active = getTask(tasks, stack.active_task_id);
+            return [
+              `⚠️ Sprint [${stack.active_task_id}: ${active?.title ?? ""}] 还在进行中。`,
+              ``,
+              `请先结束当前 sprint：`,
+              `  1. git commit 当前改动（会自动关闭 sprint）`,
+              `  2. 然后重新调用 pcp_start 开始「${title}」`,
+            ].join("\n");
+          }
+
+          // Start new sprint
+          const id = `T${String(stack.next_id).padStart(3, "0")}`;
+          appendEvent(dir, { e: "created", id, type: "main", title, ts: Date.now() });
+          stack.active_stack = [id];
+          stack.active_task_id = id;
+          stack.next_id++;
+          writeStack(dir, stack);
+
+          const lines = [`✅ Sprint [${id}] 开始：${title}`];
+
+          // Surface backlog items
+          const pending = getPendingBacklog(dir);
+          if (pending.length > 0) {
+            lines.push(``, `📋 Backlog 中有 ${pending.length} 项待回顾：`);
+            for (const item of pending) {
+              lines.push(`  ${item.id}: ${item.title}`);
+            }
+            lines.push(``, `调用 skill \`pcp-sprint-review\` 决定是否加入本次 sprint，或直接开始工作。`);
+          }
+
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_plan: tool({
+        description:
+          "加载计划任务列表。第一个任务立即开始（doing），其余按顺序排队（ready）。" +
+          "如果当前有任务在执行，新任务追加到队列末尾。" +
+          "用户给出 todolist 或计划文档时，先解析为有序任务列表再调用此工具。",
+        args: {
+          tasks: tool.schema
+            .array(tool.schema.string())
+            .describe("有序任务标题列表，如 ['实现登录页', '添加表单验证', '对接API']"),
+        },
+        async execute({ tasks }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+
+          if (tasks.length === 0) return "❌ 任务列表为空";
+
+          const created: { id: string; title: string }[] = [];
+          for (const title of tasks) {
+            const id = `T${String(stack.next_id).padStart(3, "0")}`;
+            appendEvent(dir, { e: "created", id, type: "main", title, ts: Date.now() });
+            created.push({ id, title });
+            stack.next_id++;
+          }
+
+          if (stack.active_task_id) {
+            // Active task exists → all new tasks append to ready queue
+            stack.ready_tasks = [...stack.ready_tasks, ...created];
+            writeStack(dir, stack);
+            return [
+              `✅ ${created.length} 个任务已追加到队列：`,
+              ...created.map((t) => `  ⏳ ${t.id}: ${t.title}`),
+              ``,
+              `当前任务完成后会自动推进。`,
+            ].join("\n");
+          }
+
+          // No active task → first = doing, rest = ready
+          const [first, ...rest] = created;
+          stack.active_stack = [first.id];
+          stack.active_task_id = first.id;
+          stack.ready_tasks = [...stack.ready_tasks, ...rest];
+          writeStack(dir, stack);
+
+          const lines = [`✅ Plan 已加载（${created.length} 个任务）：`];
+          lines.push(`  📌 ${first.id}: ${first.title}  ← doing`);
+          for (const t of rest) {
+            lines.push(`  ⏳ ${t.id}: ${t.title}`);
+          }
+
+          const pending = getPendingBacklog(dir);
+          if (pending.length > 0) {
+            lines.push(``, `📋 Backlog 中有 ${pending.length} 项待回顾 — pcp_backlog 查看`);
+          }
+
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_sub: tool({
+        description:
+          "开始一个子任务（压栈到当前任务之上）。git commit 后自动弹回主线。",
+        args: {
+          title: tool.schema.string().describe("子任务标题"),
+        },
+        async execute({ title }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+
+          if (!stack.active_task_id) {
+            return "❌ 没有进行中的主任务，请先写一些代码触发自动开始";
+          }
+
+          const parentId = stack.active_task_id;
+          const id = `T${String(stack.next_id).padStart(3, "0")}`;
+
+          const tasks = replayEvents(dir);
+          const parentTitle = getTask(tasks, parentId)?.title ?? parentId;
+          const resumePrompt = `准备进入子任务【${title}】，完成后继续主任务：${parentTitle}。`;
+
+          appendEvent(dir, {
+            e: "resume_set",
+            id: parentId,
+            prompt: resumePrompt,
+            ts: Date.now(),
+          });
+          appendEvent(dir, { e: "sub", id, parent: parentId, title, ts: Date.now() });
+
+          stack.active_stack.push(id);
+          stack.active_task_id = id;
+          stack.next_id++;
+          writeStack(dir, stack);
+
+          return `✅ 子任务 [${id}] 已开始：${title}\n\ngit commit 后自动返回主线`;
+        },
+      }),
+
+      pcp_done: tool({
+        description:
+          "手动完成当前任务（git commit 会自动触发，仅在需要手动完成时使用）。" +
+          "如果队列中有下一个任务会自动推进，全部完成时提示做新 plan。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+
+          if (!stack.active_task_id) return "❌ 没有进行中的任务";
+
+          const doneId = stack.active_task_id;
+          const tasks = replayEvents(dir);
+          const doneTask = getTask(tasks, doneId);
+          appendEvent(dir, { e: "done", id: doneId, ts: Date.now() });
+          stack.active_stack.pop();
+
+          // Case 1: sub-task done → return to parent
+          if (stack.active_stack.length > 0) {
+            const parentId = stack.active_stack[stack.active_stack.length - 1];
+            stack.active_task_id = parentId;
+            writeStack(dir, stack);
+
+            const parentTask = getTask(tasks, parentId);
+            if (parentTask) {
+              return `子任务【${doneTask?.title ?? doneId}】已完成。\n继续主任务：${parentTask.title}。`;
+            }
+            return `✅ [${doneId}] 已完成，返回 [${parentId}]`;
+          }
+
+          // Case 2: main task done → try auto-advance from ready queue
+          if (stack.ready_tasks.length > 0) {
+            const next = stack.ready_tasks.shift()!;
+            stack.active_stack = [next.id];
+            stack.active_task_id = next.id;
+            writeStack(dir, stack);
+
+            const remaining = stack.ready_tasks.length;
+            const lines = [
+              `✅ [${doneId}] ${doneTask?.title ?? ""} 完成！`,
+              ``,
+              `⏭️ 自动推进 → [${next.id}] ${next.title}`,
+            ];
+            if (remaining > 0) {
+              lines.push(`   (还有 ${remaining} 个任务排队)`);
+            } else {
+              lines.push(`   (这是最后一个计划任务)`);
+            }
+            return lines.join("\n");
+          }
+
+          // Case 3: all tasks done
+          stack.active_task_id = null;
+          writeStack(dir, stack);
+
+          const pending = getPendingBacklog(dir);
+          const lines = [`🎉 所有计划任务已完成！`];
+          if (pending.length > 0) {
+            lines.push(
+              ``,
+              `📋 Backlog 中有 ${pending.length} 项待回顾：`,
+              ...pending.map((item) => `  ${item.id}: ${item.title}`),
+            );
+          }
+          lines.push(``, `💡 建议：让 planner 规划下一轮任务，然后 pcp_plan 加载。`);
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_pivot: tool({
+        description:
+          "中途发现更好的方向时，放弃当前任务并记录原因。" +
+          "与 pcp_done 不同：pivot 表示任务未完成但被更好的方案取代，历史中会保留原因。" +
+          "检测到用户说「本来/原本/我们是要...现在/改成/发现更好」时，先确认再调用。",
+        args: {
+          reason: tool.schema.string().describe("pivot 原因，如「发现直接生成新闻稿更高效」"),
+          new_task: tool.schema
+            .string()
+            .optional()
+            .describe("可选：立即开始的新任务标题"),
+          drop_queue: tool.schema
+            .boolean()
+            .optional()
+            .describe("可选：是否同时清空后续任务队列（整个计划都要变时用，默认 false）"),
+        },
+        async execute({ reason, new_task, drop_queue = false }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+
+          if (!stack.active_task_id) return "❌ 没有进行中的任务";
+
+          const pivotId = stack.active_task_id;
+          const tasks = replayEvents(dir);
+          const pivotTask = getTask(tasks, pivotId);
+
+          // Record pivot event (not "done")
+          appendEvent(dir, { e: "pivoted", id: pivotId, reason, ts: Date.now() });
+          stack.active_stack.pop();
+
+          const droppedQueue = drop_queue ? stack.ready_tasks.splice(0) : [];
+
+          const lines = [
+            `🔄 [${pivotId}] ${pivotTask?.title ?? ""} → pivot`,
+            `   原因: ${reason}`,
+          ];
+
+          if (droppedQueue.length > 0) {
+            lines.push(`   已清空队列 ${droppedQueue.length} 个任务`);
+          }
+
+          if (new_task) {
+            // Start new task immediately
+            const id = `T${String(stack.next_id).padStart(3, "0")}`;
+            appendEvent(dir, { e: "created", id, type: "main", title: new_task, ts: Date.now() });
+            stack.active_stack = [id];
+            stack.active_task_id = id;
+            stack.next_id++;
+            writeStack(dir, stack);
+            lines.push(``, `⏭️ 新方向 → [${id}] ${new_task}`);
+            if (stack.ready_tasks.length > 0) {
+              lines.push(`   (队列还有 ${stack.ready_tasks.length} 个任务)`);
+            }
+          } else {
+            stack.active_task_id =
+              stack.active_stack.length > 0
+                ? stack.active_stack[stack.active_stack.length - 1]
+                : null;
+            writeStack(dir, stack);
+            lines.push(``, `💡 调用 pcp_start 或 pcp_plan 开始新方向。`);
+          }
+
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_status: tool({
+        description: "查看当前任务栈、队列、项目基线和 backlog 状态。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          const stack = readStack(dir);
+          const projectCtx = readProjectContext(dir);
+          const lines: string[] = [];
+
+          if (projectCtx) lines.push(`[项目] ${projectCtx}`);
+
+          if (!stack.active_task_id) {
+            lines.push("当前没有进行中的任务。");
+            if (stack.ready_tasks.length > 0) {
+              lines.push(`\n⏳ 队列中有 ${stack.ready_tasks.length} 个任务待执行：`);
+              for (const t of stack.ready_tasks) {
+                lines.push(`  ${t.id}: ${t.title}`);
+              }
+            }
+            const pending = getPendingBacklog(dir);
+            if (pending.length > 0) {
+              lines.push(`📋 Backlog 中有 ${pending.length} 项待回顾，调用 pcp_backlog 查看。`);
+            }
+            lines.push(`\n💡 建议：让 planner 规划任务，然后 pcp_plan 加载。`);
+            return lines.join("\n");
+          }
+
+          const tasks = replayEvents(dir);
+          lines.push("当前任务栈：");
+
+          for (let i = 0; i < stack.active_stack.length; i++) {
+            const id = stack.active_stack[i];
+            const task = getTask(tasks, id);
+            const isCurrent = id === stack.active_task_id;
+            const prefix = i === 0 ? "[主]" : "[子]";
+            lines.push(
+              `  ${prefix} ${id} ${task?.title ?? id}${isCurrent ? "  ← 当前" : ""}`,
+            );
+          }
+
+          if (stack.ready_tasks.length > 0) {
+            lines.push(`\n⏳ 队列（${stack.ready_tasks.length} 个）：`);
+            for (const t of stack.ready_tasks) {
+              lines.push(`  ${t.id}: ${t.title}`);
+            }
+          }
+
+          const pending = getPendingBacklog(dir);
+          if (pending.length > 0) {
+            lines.push(`📋 Backlog: ${pending.length} 项待回顾`);
+          }
+
+          return lines.join("\n");
+        },
+      }),
+
+      // ── Backlog tools ───────────────────────────
+
+      pcp_capture: tool({
+        description:
+          "记录临时想法或需求到 backlog，不立即执行。" +
+          "当用户说「后续做X」「顺便加个X」「以后想做X」「记一下X」时立即调用。" +
+          "sprint 结束时通过 pcp-sprint-review skill 统一回顾。",
+        args: {
+          title: tool.schema.string().describe("需求或想法标题"),
+          detail: tool.schema.string().optional().describe("可选：补充说明"),
+        },
+        async execute({ title, detail }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+          const id = `B${String(stack.backlog_next_id).padStart(3, "0")}`;
+
+          appendEvent(dir, { e: "backlog_add", id, title, detail, ts: Date.now() });
+          stack.backlog_next_id++;
+          writeStack(dir, stack);
+
+          return `📝 已记录到 backlog: [${id}] ${title}\n当前 sprint 继续，sprint 结束时回顾。`;
+        },
+      }),
+
+      pcp_backlog: tool({
+        description: "查看 backlog 中所有待处理的项目。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          const pending = getPendingBacklog(dir);
+
+          if (pending.length === 0) return "📋 Backlog 为空。";
+
+          const lines = [`📋 Backlog（${pending.length} 项）：`];
+          for (const item of pending) {
+            lines.push(`  ${item.id}: ${item.title}`);
+            if (item.detail) lines.push(`       ${item.detail}`);
+          }
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_promote: tool({
+        description:
+          "将 backlog 中的项目加入当前 sprint 作为子任务。sprint 回顾时使用。",
+        args: {
+          backlog_id: tool.schema.string().describe("Backlog 项目 ID（如 B001）"),
+          title: tool.schema.string().optional().describe("可选：覆盖子任务标题"),
+        },
+        async execute({ backlog_id, title }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+
+          if (!stack.active_task_id) {
+            return `❌ 没有进行中的 sprint，请先 pcp_start 开始一个 sprint`;
+          }
+
+          const backlog = replayBacklog(dir);
+          const item = backlog.find((b) => b.id === backlog_id);
+          if (!item) return `❌ 找不到 backlog 项目 ${backlog_id}`;
+          if (item.status !== "pending") return `❌ ${backlog_id} 状态为 ${item.status}，无法加入`;
+
+          const taskTitle = title || item.title;
+          const id = `T${String(stack.next_id).padStart(3, "0")}`;
+          const parentId = stack.active_task_id;
+
+          const tasks = replayEvents(dir);
+          const parentTitle = getTask(tasks, parentId)?.title ?? parentId;
+          const resumePrompt = `来自 backlog 的子任务【${taskTitle}】，完成后继续主线：${parentTitle}。`;
+
+          appendEvent(dir, { e: "resume_set", id: parentId, prompt: resumePrompt, ts: Date.now() });
+          appendEvent(dir, { e: "sub", id, parent: parentId, title: taskTitle, ts: Date.now() });
+          appendEvent(dir, { e: "backlog_promote", backlog_id, task_id: id, ts: Date.now() });
+
+          stack.active_stack.push(id);
+          stack.active_task_id = id;
+          stack.next_id++;
+          writeStack(dir, stack);
+
+          return `✅ [${backlog_id}] 已加入 sprint 作为子任务 [${id}]：${taskTitle}`;
+        },
+      }),
+
+      pcp_dismiss: tool({
+        description: "忽略 backlog 中的某项（本次不做，也不再提醒）。",
+        args: {
+          backlog_id: tool.schema.string().describe("Backlog 项目 ID（如 B001）"),
+        },
+        async execute({ backlog_id }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+
+          const backlog = replayBacklog(dir);
+          const item = backlog.find((b) => b.id === backlog_id);
+          if (!item) return `❌ 找不到 backlog 项目 ${backlog_id}`;
+          if (item.status !== "pending") return `ℹ️ ${backlog_id} 已是 ${item.status} 状态`;
+
+          appendEvent(dir, { e: "backlog_dismiss", backlog_id, ts: Date.now() });
+          return `❌ [${backlog_id}] 已忽略：${item.title}`;
+        },
+      }),
+
+      pcp_history: tool({
+        description: "查看所有历史 sprint（已完成 + 进行中）和 backlog 全记录。",
+        args: {
+          limit: tool.schema
+            .number()
+            .optional()
+            .describe("最多显示已完成 sprint 数（默认 20）"),
+        },
+        async execute({ limit = 20 }, context) {
+          const dir = context.directory;
+          const tasks = replayEvents(dir);
+          const backlog = replayBacklog(dir);
+          const stack = readStack(dir);
+
+          const lines: string[] = [];
+
+          // Completed main sprints
+          const done = tasks
+            .filter((t) => t.done && t.type === "main")
+            .slice(-limit);
+          if (done.length > 0) {
+            lines.push("=== 已完成 Sprint ===");
+            for (const t of done) {
+              const isPivoted = (t as any).pivoted;
+              const pivotReason = (t as any).pivot_reason;
+              const icon = isPivoted ? "🔄" : "✅";
+              const suffix = isPivoted && pivotReason ? `  (pivot: ${pivotReason})` : "";
+              lines.push(`  ${icon} ${t.id}  ${t.title}${suffix}`);
+            }
+          }
+
+          // Active stack
+          if (stack.active_task_id) {
+            lines.push("\n=== 进行中 ===");
+            for (let i = 0; i < stack.active_stack.length; i++) {
+              const id = stack.active_stack[i];
+              const t = getTask(tasks, id);
+              const isCurrent = id === stack.active_task_id;
+              const prefix = i === 0 ? "[主]" : "[子]";
+              lines.push(
+                `  📌 ${prefix} ${id}  ${t?.title ?? id}${isCurrent ? "  ← 当前" : ""}`,
+              );
+            }
+          }
+
+          // Ready queue
+          if (stack.ready_tasks.length > 0) {
+            lines.push("\n=== 队列 ===");
+            for (const t of stack.ready_tasks) {
+              lines.push(`  ⏳ ${t.id}  ${t.title}`);
+            }
+          }
+
+          // Full backlog
+          if (backlog.length > 0) {
+            lines.push("\n=== Backlog ===");
+            for (const item of backlog) {
+              const icon =
+                item.status === "pending" ? "📝" :
+                item.status === "promoted" ? "✅" : "❌";
+              const suffix =
+                item.status === "promoted" ? ` → 已加入 ${item.promoted_to}` :
+                item.status === "dismissed" ? " (已忽略)" : "";
+              lines.push(`  ${icon} ${item.id}  ${item.title}${suffix}`);
+            }
+          }
+
+          if (lines.length === 0) return "暂无记录。";
+          return lines.join("\n");
+        },
+      }),
+    },
+
+    // ── Auto-lifecycle hooks ────────────────────
+
+    "tool.execute.before": async (input, _output) => {
+      try {
+        const { tool: toolName, sessionID } = input;
+        if (toolName.startsWith("pcp_")) return;
+        if (!isWriteTool(toolName)) return;
+
+        const dir = await getSessionDir(sessionID);
+        const stack = readStack(dir);
+        if (stack.active_task_id) return;
+
+        const title = await resolveTitle(sessionID);
+        autoCreateTask(dir, title);
+      } catch {
+        // silent
+      }
+    },
+
+    "tool.execute.after": async (input, _output) => {
+      try {
+        const { tool: toolName, sessionID, args } = input;
+        if (!isBashTool(toolName)) return;
+
+        const cmd: string =
+          typeof args?.command === "string" ? args.command :
+          typeof args?.cmd === "string" ? args.cmd :
+          typeof args?.input === "string" ? args.input : "";
+
+        if (!/git\s+commit/.test(cmd)) return;
+
+        const dir = await getSessionDir(sessionID);
+        autoDoneTask(dir);
+      } catch {
+        // silent
+      }
+    },
+
+    // ── Context injection hooks ─────────────────
+
+    "experimental.chat.system.transform": async (input, output) => {
+      try {
+        const dir = input.sessionID
+          ? await getSessionDir(input.sessionID)
+          : directory;
+        const stack = readStack(dir);
+        const tasks = replayEvents(dir);
+        const projectCtx = readProjectContext(dir);
+        const pendingCount = getPendingBacklog(dir).length;
+        const ctx = buildShortContext(stack, tasks, projectCtx, pendingCount);
+        if (ctx) output.system.push(ctx);
+      } catch {
+        // silent
+      }
+    },
+
+    "experimental.session.compacting": async (input, output) => {
+      try {
+        const dir = await getSessionDir(input.sessionID);
+        const stack = readStack(dir);
+        const tasks = replayEvents(dir);
+        const projectCtx = readProjectContext(dir);
+        const pendingCount = getPendingBacklog(dir).length;
+        const ctx = buildResumeContext(stack, tasks, projectCtx, pendingCount);
+        if (ctx) output.context.push(ctx);
+      } catch {
+        // silent
+      }
+    },
+  };
+};
+
+export default PCPPlugin;
