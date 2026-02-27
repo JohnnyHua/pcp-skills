@@ -315,7 +315,7 @@ function isBashTool(name: string): boolean {
 // ──────────────────────────────────────────────
 
 // PCP behavioral rule — always injected to ALL agents via system.transform
-const PCP_RULE = `[PCP规则] 任务语言：跟随用户沟通语言(用户说中文→中文任务,说English→English tasks); 任务粒度：每个Task=具体可交付物(≤2h,有完成标准),禁止创建项目目标/Sprint容器类大任务; pcp_sub仅用于临时绕行(做完立即返回),禁止用pcp_sub执行队列中的Task; 【完成审查】任务完成时如有产出文件→列出清单问"需要审查吗？"→需要则按类型展示(.md→pandoc转PDF给路径,.json→格式化关键字段,.txt→短文件直接贴/长文件摘要,代码→git diff关键变更)→确认后再pcp_done,不需要则直接pcp_done; "以后/顺便/记一下X"→pcp_capture; 收到todolist/计划→pcp_plan(tasks)加载后展示清单等用户确认再执行; "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
+const PCP_RULE = `[PCP规则] 任务语言：跟随用户沟通语言(用户说中文→中文任务,说English→English tasks); 任务粒度：每个Task=具体可交付物(≤2h,有完成标准),禁止创建项目目标/Sprint容器类大任务; pcp_sub仅用于临时绕行(做完立即返回),禁止用pcp_sub执行队列中的Task; 【完成审查】任务完成时如有产出文件→列出清单问"需要审查吗？"→需要则按类型展示(.md→pandoc转PDF给路径,.json→格式化关键字段,.txt→短文件直接贴/长文件摘要,代码→git diff关键变更)→确认后再pcp_done,不需要则直接pcp_done; "以后/顺便/记一下X"→pcp_capture; 收到todolist/计划→先扫描项目已有代码和产出文件,已完成的工作不建任务→pcp_plan(tasks)加载后展示清单等用户确认再执行; "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
 
 function buildShortContext(
   stack: Stack,
