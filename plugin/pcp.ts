@@ -315,7 +315,7 @@ function isBashTool(name: string): boolean {
 // ──────────────────────────────────────────────
 
 // PCP behavioral rule — always injected to ALL agents via system.transform
-const PCP_RULE = `[PCP] "以后/顺便/记一下X"→pcp_capture; 收到todolist/计划→pcp_plan(tasks)，加载后展示清单问"确认开始？可在这里调整任务描述"，等用户确认再执行T001; "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
+const PCP_RULE = `[PCP规则] 任务粒度：每个Task=具体可交付物(≤2h,有完成标准),禁止创建项目目标/Sprint容器类大任务; pcp_sub仅用于临时绕行(做完立即返回),禁止用pcp_sub执行队列中的Task; "以后/顺便/记一下X"→pcp_capture; 收到todolist/计划→pcp_plan(tasks)加载后展示清单等用户确认再执行; "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
 
 function buildShortContext(
   stack: Stack,
@@ -536,8 +536,10 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
 
       pcp_start: tool({
         description:
-          "开始一个新 sprint（主任务）。写代码会自动开始任务，仅在需要自定义标题时手动调用。" +
-          "若当前已有 sprint 进行中，会提示先 git commit 关闭当前 sprint。",
+          "手动开始一个具体任务（有多个任务时优先用 pcp_plan 批量加载）。" +
+          "【任务粒度要求】标题必须是具体可交付物，≤2小时可完成，含验收标准。" +
+          "禁止用此工具创建项目目标或大方向描述（如'开发XX系统'）。" +
+          "若当前已有任务进行中，会提示先完成当前任务。",
         args: {
           title: tool.schema.string().describe("Sprint 标题"),
         },
