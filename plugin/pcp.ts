@@ -315,7 +315,7 @@ function isBashTool(name: string): boolean {
 // ──────────────────────────────────────────────
 
 // PCP behavioral rule — always injected to ALL agents via system.transform
-const PCP_RULE = `[PCP] "以后/顺便/记一下X"→pcp_capture; todolist/计划→pcp_plan(tasks); "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
+const PCP_RULE = `[PCP] "以后/顺便/记一下X"→pcp_capture; 收到todolist/计划→pcp_plan(tasks)，加载后展示清单问"确认开始？可在这里调整任务描述"，等用户确认再执行T001; "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
 
 function buildShortContext(
   stack: Stack,
@@ -587,7 +587,9 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         description:
           "加载计划任务列表。第一个任务立即开始（doing），其余按顺序排队（ready）。" +
           "如果当前有任务在执行，新任务追加到队列末尾。" +
-          "用户给出 todolist 或计划文档时，先解析为有序任务列表再调用此工具。",
+          "用户给出 todolist 或计划文档时，先解析为有序任务列表再调用此工具。" +
+          "【任务质量标准】每个任务标题应具体可验证：含改动文件/目标、预期结果或验收条件，避免泛化描述。" +
+          "例：'src/fetcher.py: 为 china_ai 限定信源列表+关键词白名单（输出匹配样本3条）' 优于 '优化信源过滤'。",
         args: {
           tasks: tool.schema
             .array(tool.schema.string())
@@ -627,8 +629,8 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           stack.ready_tasks = [...stack.ready_tasks, ...rest];
           writeStack(dir, stack);
 
-          const lines = [`✅ Plan 已加载（${created.length} 个任务）：`];
-          lines.push(`  📌 ${first.id}: ${first.title}  ← doing`);
+          const lines = [`📋 Plan 已加载（${created.length} 个任务），待确认：`];
+          lines.push(`  📌 ${first.id}: ${first.title}`);
           for (const t of rest) {
             lines.push(`  ⏳ ${t.id}: ${t.title}`);
           }
@@ -637,6 +639,8 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           if (pending.length > 0) {
             lines.push(``, `📋 Backlog 中有 ${pending.length} 项待回顾 — pcp_backlog 查看`);
           }
+
+          lines.push(``, `⏸ 确认开始执行？可在这里调整任务描述后回复"确认"。`);
 
           return lines.join("\n");
         },
