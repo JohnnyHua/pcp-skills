@@ -108,8 +108,44 @@ function appendWorklog(dir: string, line: string): void {
   fs.appendFileSync(p, `- ${ts} ${line}\n`);
 }
 
-function writeProjectMd(dir: string, content: string): void {
-  fs.writeFileSync(path.join(pcpDir(dir), "PROJECT.md"), content);
+interface ProjectData {
+  name: string;
+  summary: string;
+  detail: string | null;
+  extra: string | null;
+  key_files: string[];
+  status: string | null;
+  updated_at: string;
+}
+
+function writeProjectFiles(dir: string, data: ProjectData): void {
+  // JSON — machine readable
+  fs.writeFileSync(
+    path.join(pcpDir(dir), "PROJECT.json"),
+    JSON.stringify(data, null, 2),
+  );
+  // MD — human readable
+  const lines = [`# ${data.name}`, ""];
+  if (data.summary) lines.push(`## 摘要`, data.summary, "");
+  if (data.detail) lines.push(`## 扫描详情`, data.detail, "");
+  if (data.key_files.length > 0) {
+    lines.push(`## 关键文件`, ...data.key_files.map(f => `- ${f}`), "");
+  }
+  if (data.extra) lines.push(`## 补充说明`, data.extra, "");
+  lines.push(
+    `## 现状`,
+    `> 建议手动补充：当前能做什么、已知问题、下一步方向`,
+    "",
+    `---`,
+    `*更新于 ${data.updated_at}，再次调用 pcp_init 可刷新*`,
+  );
+  fs.writeFileSync(path.join(pcpDir(dir), "PROJECT.md"), lines.join("\n"));
+}
+
+function readProjectJson(dir: string): ProjectData | null {
+  const p = path.join(pcpDir(dir), "PROJECT.json");
+  if (!fs.existsSync(p)) return null;
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
 }
 
 function readProjectMd(dir: string): string | null {
@@ -308,7 +344,7 @@ function scanProject(dir: string): { summary: string; detail: string } {
   if (entries.length) detail.push(`入口: ${entries.slice(0, 3).join(", ")}`);
 
   const summary = facts.filter(Boolean).join(" ").slice(0, 100) || path.basename(dir);
-  return { summary, detail: detail.join("\n") };
+  return { summary, detail: detail.join("\n"), key_files: entries.slice(0, 5) };
 }
 
 // ──────────────────────────────────────────────
@@ -537,7 +573,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           const dir = context.directory;
           ensureDir(dir);
 
-          const { summary, detail } = scanProject(dir);
+          const { summary, detail, key_files } = scanProject(dir);
           const full = extra ? `${summary}；${extra}` : summary;
 
           appendEvent(dir, {
@@ -546,19 +582,17 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             ts: Date.now(),
           });
 
-          // Generate PROJECT.md
-          const projectLines = [`# ${summary.split("；")[0] || "Project"}`, ""];
-          if (full) projectLines.push(`## 摘要`, full, "");
-          if (detail) projectLines.push(`## 扫描详情`, detail, "");
-          if (extra) projectLines.push(`## 补充说明`, extra, "");
-          projectLines.push(
-            `## 现状`,
-            `> pcp_init 自动生成，建议手动补充：当前能做什么、已知问题、下一步方向`,
-            "",
-            `---`,
-            `*更新于 ${new Date().toISOString().slice(0, 10)}，再次调用 pcp_init 可刷新*`,
-          );
-          writeProjectMd(dir, projectLines.join("\n"));
+          // Generate PROJECT.md + PROJECT.json
+          const projectData: ProjectData = {
+            name: summary.split("；")[0] || path.basename(dir),
+            summary: full,
+            detail: detail || null,
+            extra: extra || null,
+            key_files,
+            status: null,
+            updated_at: new Date().toISOString().slice(0, 10),
+          };
+          writeProjectFiles(dir, projectData);
           appendWorklog(dir, `📦 pcp_init: 项目基线已建立`);
 
           const lines = [
