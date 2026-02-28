@@ -100,6 +100,24 @@ function appendEvent(dir: string, event: PcpEvent): void {
   );
 }
 
+function appendWorklog(dir: string, line: string): void {
+  const p = path.join(pcpDir(dir), "WORKLOG.md");
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 16);
+  const header = "# PCP Worklog\n\n";
+  if (!fs.existsSync(p)) fs.writeFileSync(p, header);
+  fs.appendFileSync(p, `- ${ts} ${line}\n`);
+}
+
+function writeProjectMd(dir: string, content: string): void {
+  fs.writeFileSync(path.join(pcpDir(dir), "PROJECT.md"), content);
+}
+
+function readProjectMd(dir: string): string | null {
+  const p = path.join(pcpDir(dir), "PROJECT.md");
+  if (!fs.existsSync(p)) return null;
+  return fs.readFileSync(p, "utf8");
+}
+
 function replayEvents(dir: string): Task[] {
   const p = path.join(pcpDir(dir), "events.jsonl");
   if (!fs.existsSync(p)) return [];
@@ -354,11 +372,23 @@ function buildResumeContext(
   tasks: Task[],
   projectCtx: string | null,
   pendingBacklogCount: number,
+  dir?: string,
 ): string {
   const lines: string[] = [];
 
   if (projectCtx) {
     lines.push(`[项目] ${projectCtx.slice(0, 80)}`);
+  }
+
+  // Inject PROJECT.md "现状" section if available
+  if (dir) {
+    const projectMd = readProjectMd(dir);
+    if (projectMd) {
+      const statusMatch = projectMd.match(/## 现状\n([\s\S]*?)(?=\n## |---|\n*$)/);
+      if (statusMatch?.[1]?.trim() && !statusMatch[1].includes("pcp_init 自动生成")) {
+        lines.push(`[现状] ${statusMatch[1].trim().slice(0, 150)}`);
+      }
+    }
   }
 
   if (stack.active_task_id) {
@@ -516,6 +546,21 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             ts: Date.now(),
           });
 
+          // Generate PROJECT.md
+          const projectLines = [`# ${summary.split("；")[0] || "Project"}`, ""];
+          if (full) projectLines.push(`## 摘要`, full, "");
+          if (detail) projectLines.push(`## 扫描详情`, detail, "");
+          if (extra) projectLines.push(`## 补充说明`, extra, "");
+          projectLines.push(
+            `## 现状`,
+            `> pcp_init 自动生成，建议手动补充：当前能做什么、已知问题、下一步方向`,
+            "",
+            `---`,
+            `*更新于 ${new Date().toISOString().slice(0, 10)}，再次调用 pcp_init 可刷新*`,
+          );
+          writeProjectMd(dir, projectLines.join("\n"));
+          appendWorklog(dir, `📦 pcp_init: 项目基线已建立`);
+
           const lines = [
             `✅ PCP 项目基线已建立`,
             ``,
@@ -525,6 +570,9 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             lines.push(``, `扫描详情：`, ...detail.split("\n").map((l) => `  ${l}`));
           }
           lines.push(
+            ``,
+            `📝 已生成 .opencode/pcp/PROJECT.md — 建议补充"现状"部分`,
+            `📝 已初始化 .opencode/pcp/WORKLOG.md — 后续操作自动记录`,
             ``,
             `此上下文将在每次对话和 compaction 时自动注入。`,
             `如需更新可再次调用 pcp_init。`,
@@ -636,6 +684,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           stack.ready_tasks = [...stack.ready_tasks, ...rest];
           writeStack(dir, stack);
 
+          appendWorklog(dir, `📋 Plan 加载 ${created.length} 个任务: ${created.map(t => t.id).join(", ")}`);
           const lines = [`📋 Plan 已加载（${created.length} 个任务），待确认：`];
           lines.push(`  📌 ${first.id}: ${first.title}`);
           for (const t of rest) {
@@ -708,6 +757,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           const tasks = replayEvents(dir);
           const doneTask = getTask(tasks, doneId);
           appendEvent(dir, { e: "done", id: doneId, ts: Date.now() });
+          appendWorklog(dir, `✅ [${doneId}] ${doneTask?.title ?? doneId}`);
           stack.active_stack.pop();
 
           // Case 1: sub-task done → return to parent
@@ -791,6 +841,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
 
           // Record pivot event (not "done")
           appendEvent(dir, { e: "pivoted", id: pivotId, reason, ts: Date.now() });
+          appendWorklog(dir, `🔄 [${pivotId}] ${pivotTask?.title ?? pivotId} → pivot: ${reason}`);
           stack.active_stack.pop();
 
           const droppedQueue = drop_queue ? stack.ready_tasks.splice(0) : [];
@@ -1125,7 +1176,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         const tasks = replayEvents(dir);
         const projectCtx = readProjectContext(dir);
         const pendingCount = getPendingBacklog(dir).length;
-        const ctx = buildResumeContext(stack, tasks, projectCtx, pendingCount);
+        const ctx = buildResumeContext(stack, tasks, projectCtx, pendingCount, dir);
         if (ctx) output.context.push(ctx);
       } catch {
         // silent
