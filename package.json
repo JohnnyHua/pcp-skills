@@ -1,0 +1,21 @@
+{
+  "name": "pcp-skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PCP plugin and bundled skills for AI coding agents",
+  "scripts": {
+    "build": "tsc --outDir dist --rootDir .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.2.24"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

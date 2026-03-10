@@ -1,351 +1,24 @@
-import { tool } from "@opencode-ai/plugin";
 import type { Plugin } from "@opencode-ai/plugin";
-import * as fs from "fs";
-import * as path from "path";
+import { tool } from "@opencode-ai/plugin/tool";
+import path from "node:path";
 
-// ──────────────────────────────────────────────
-// Types
-// ──────────────────────────────────────────────
-
-interface Stack {
-  next_id: number;
-  backlog_next_id: number;
-  active_stack: string[];
-  active_task_id: string | null;
-  ready_tasks: { id: string; title: string }[];
-}
-
-interface PcpEvent {
-  e:
-    | "created"
-    | "sub"
-    | "done"
-    | "pivoted"
-    | "resume_set"
-    | "project_context"
-    | "backlog_add"
-    | "backlog_promote"
-    | "backlog_dismiss";
-  id?: string;
-  type?: "main" | "sub";
-  title?: string;
-  parent?: string;
-  prompt?: string;
-  summary?: string;
-  detail?: string;
-  reason?: string;
-  backlog_id?: string;
-  task_id?: string;
-  ts: number;
-}
-
-interface Task {
-  id: string;
-  type: "main" | "sub";
-  title: string;
-  parent?: string;
-  done: boolean;
-  resume_prompt?: string;
-}
-
-interface BacklogItem {
-  id: string;
-  title: string;
-  detail?: string;
-  status: "pending" | "promoted" | "dismissed";
-  promoted_to?: string;
-}
-
-// ──────────────────────────────────────────────
-// Data layer
-// ──────────────────────────────────────────────
-
-function pcpDir(dir: string): string {
-  return path.join(dir, ".opencode", "pcp");
-}
-
-function ensureDir(dir: string): void {
-  const d = pcpDir(dir);
-  if (!fs.existsSync(d)) {
-    fs.mkdirSync(d, { recursive: true });
-  }
-}
-
-function readStack(dir: string): Stack {
-  const p = path.join(pcpDir(dir), "stack.json");
-  if (!fs.existsSync(p)) {
-    return { next_id: 1, backlog_next_id: 1, active_stack: [], active_task_id: null, ready_tasks: [] };
-  }
-  try {
-    const s = JSON.parse(fs.readFileSync(p, "utf8")) as Stack;
-    if (s.backlog_next_id === undefined) s.backlog_next_id = 1; // migrate old stacks
-    if (s.ready_tasks === undefined) s.ready_tasks = []; // migrate old stacks
-    return s;
-  } catch {
-    return { next_id: 1, backlog_next_id: 1, active_stack: [], active_task_id: null, ready_tasks: [] };
-  }
-}
-
-function writeStack(dir: string, s: Stack): void {
-  fs.writeFileSync(
-    path.join(pcpDir(dir), "stack.json"),
-    JSON.stringify(s, null, 2),
-  );
-}
-
-function appendEvent(dir: string, event: PcpEvent): void {
-  fs.appendFileSync(
-    path.join(pcpDir(dir), "events.jsonl"),
-    JSON.stringify(event) + "\n",
-  );
-}
-
-function appendWorklog(dir: string, line: string): void {
-  const p = path.join(pcpDir(dir), "WORKLOG.md");
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 16);
-  const header = "# PCP Worklog\n\n";
-  if (!fs.existsSync(p)) fs.writeFileSync(p, header);
-  fs.appendFileSync(p, `- ${ts} ${line}\n`);
-}
-
-interface ProjectData {
-  name: string;
-  summary: string;
-  detail: string | null;
-  extra: string | null;
-  key_files: string[];
-  status: string | null;
-  updated_at: string;
-}
-
-function writeProjectFiles(dir: string, data: ProjectData): void {
-  // JSON — machine readable
-  fs.writeFileSync(
-    path.join(pcpDir(dir), "PROJECT.json"),
-    JSON.stringify(data, null, 2),
-  );
-  // MD — human readable
-  const lines = [`# ${data.name}`, ""];
-  if (data.summary) lines.push(`## 摘要`, data.summary, "");
-  if (data.detail) lines.push(`## 扫描详情`, data.detail, "");
-  if (data.key_files.length > 0) {
-    lines.push(`## 关键文件`, ...data.key_files.map(f => `- ${f}`), "");
-  }
-  if (data.extra) lines.push(`## 补充说明`, data.extra, "");
-  lines.push(
-    `## 现状`,
-    `> 建议手动补充：当前能做什么、已知问题、下一步方向`,
-    "",
-    `---`,
-    `*更新于 ${data.updated_at}，再次调用 pcp_init 可刷新*`,
-  );
-  fs.writeFileSync(path.join(pcpDir(dir), "PROJECT.md"), lines.join("\n"));
-}
-
-function readProjectJson(dir: string): ProjectData | null {
-  const p = path.join(pcpDir(dir), "PROJECT.json");
-  if (!fs.existsSync(p)) return null;
-  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
-}
-
-function readProjectMd(dir: string): string | null {
-  const p = path.join(pcpDir(dir), "PROJECT.md");
-  if (!fs.existsSync(p)) return null;
-  return fs.readFileSync(p, "utf8");
-}
-
-function replayEvents(dir: string): Task[] {
-  const p = path.join(pcpDir(dir), "events.jsonl");
-  if (!fs.existsSync(p)) return [];
-
-  const tasks = new Map<string, Task>();
-
-  for (const line of fs
-    .readFileSync(p, "utf8")
-    .trim()
-    .split("\n")
-    .filter(Boolean)) {
-    try {
-      const event = JSON.parse(line) as PcpEvent;
-      if (event.e === "created" && event.id) {
-        tasks.set(event.id, {
-          id: event.id,
-          type: event.type ?? "main",
-          title: event.title ?? "",
-          done: false,
-        });
-      } else if (event.e === "sub" && event.id) {
-        tasks.set(event.id, {
-          id: event.id,
-          type: "sub",
-          title: event.title ?? "",
-          parent: event.parent,
-          done: false,
-        });
-      } else if ((event.e === "done" || event.e === "pivoted") && event.id) {
-        const task = tasks.get(event.id);
-        if (task) {
-          task.done = true;
-          if (event.e === "pivoted") (task as any).pivoted = true;
-          if (event.reason) (task as any).pivot_reason = event.reason;
-        }
-      } else if (event.e === "resume_set" && event.id) {
-        const task = tasks.get(event.id);
-        if (task) task.resume_prompt = event.prompt;
-      }
-    } catch {
-      // skip malformed lines
-    }
-  }
-
-  return Array.from(tasks.values());
-}
-
-function replayBacklog(dir: string): BacklogItem[] {
-  const p = path.join(pcpDir(dir), "events.jsonl");
-  if (!fs.existsSync(p)) return [];
-
-  const items = new Map<string, BacklogItem>();
-
-  for (const line of fs
-    .readFileSync(p, "utf8")
-    .trim()
-    .split("\n")
-    .filter(Boolean)) {
-    try {
-      const event = JSON.parse(line) as PcpEvent;
-      if (event.e === "backlog_add" && event.id) {
-        items.set(event.id, {
-          id: event.id,
-          title: event.title ?? "",
-          detail: event.detail,
-          status: "pending",
-        });
-      } else if (event.e === "backlog_promote" && event.backlog_id) {
-        const item = items.get(event.backlog_id);
-        if (item) {
-          item.status = "promoted";
-          item.promoted_to = event.task_id;
-        }
-      } else if (event.e === "backlog_dismiss" && event.backlog_id) {
-        const item = items.get(event.backlog_id);
-        if (item) item.status = "dismissed";
-      }
-    } catch {
-      // skip
-    }
-  }
-
-  return Array.from(items.values());
-}
-
-function getPendingBacklog(dir: string): BacklogItem[] {
-  return replayBacklog(dir).filter((item) => item.status === "pending");
-}
-
-function getTask(tasks: Task[], id: string): Task | undefined {
-  return tasks.find((t) => t.id === id);
-}
-
-function readProjectContext(dir: string): string | null {
-  const p = path.join(pcpDir(dir), "events.jsonl");
-  if (!fs.existsSync(p)) return null;
-
-  let latest: string | null = null;
-  for (const line of fs
-    .readFileSync(p, "utf8")
-    .trim()
-    .split("\n")
-    .filter(Boolean)) {
-    try {
-      const event = JSON.parse(line) as PcpEvent;
-      if (event.e === "project_context" && event.summary) {
-        latest = event.summary;
-      }
-    } catch {}
-  }
-  return latest;
-}
-
-// ──────────────────────────────────────────────
-// Project scanner (for pcp_init)
-// ──────────────────────────────────────────────
-
-function tryRead(p: string, maxChars = 400): string | null {
-  try {
-    if (!fs.existsSync(p)) return null;
-    return fs.readFileSync(p, "utf8").trim().slice(0, maxChars);
-  } catch {
-    return null;
-  }
-}
-
-function scanProject(dir: string): { summary: string; detail: string } {
-  const facts: string[] = [];
-  const detail: string[] = [];
-
-  const pkg = tryRead(path.join(dir, "package.json"));
-  if (pkg) {
-    try {
-      const p = JSON.parse(pkg);
-      if (p.name) facts.push(p.name);
-      if (p.description) facts.push(p.description);
-      const deps = { ...p.dependencies, ...p.devDependencies };
-      const frameworks = ["next", "react", "vue", "svelte", "express", "fastify", "hono"]
-        .filter((f) => deps?.[f] || deps?.[`@${f}/core`]);
-      if (frameworks.length) facts.push(`(${frameworks.join(", ")})`);
-    } catch {}
-  }
-
-  for (const manifest of [
-    ["pyproject.toml", /^name\s*=\s*"(.+)"/m, /^description\s*=\s*"(.+)"/m],
-    ["go.mod", /^module\s+(\S+)/m, null],
-    ["Cargo.toml", /^name\s*=\s*"(.+)"/m, /^description\s*=\s*"(.+)"/m],
-  ] as [string, RegExp, RegExp | null][]) {
-    const content = tryRead(path.join(dir, manifest[0]));
-    if (content) {
-      const name = manifest[1]?.exec(content)?.[1];
-      const desc = manifest[2]?.exec(content)?.[1];
-      if (name) facts.push(name);
-      if (desc) facts.push(desc);
-    }
-  }
-
-  for (const name of ["README.md", "README.rst", "README.txt", "README"]) {
-    const content = tryRead(path.join(dir, name), 800);
-    if (!content) continue;
-    const paragraphs = content
-      .replace(/^#+.*/gm, "")
-      .replace(/!\[.*?\]\(.*?\)/g, "")
-      .split(/\n\n+/)
-      .map((p) => p.replace(/\n/g, " ").trim())
-      .filter((p) => p.length > 20 && !p.startsWith("```"));
-    if (paragraphs[0]) {
-      detail.push(`README: ${paragraphs[0].slice(0, 200)}`);
-    }
-    break;
-  }
-
-  const claudeMd = tryRead(path.join(dir, "CLAUDE.md"), 500);
-  if (claudeMd) {
-    const firstPara = claudeMd
-      .split(/\n\n+/)
-      .find((p) => p.trim().length > 20 && !p.startsWith("#"));
-    if (firstPara) detail.push(`CLAUDE.md: ${firstPara.trim().slice(0, 150)}`);
-  }
-
-  const entries = [
-    "src/index.ts", "src/main.ts", "src/app.ts",
-    "src/index.tsx", "app/page.tsx", "pages/index.tsx",
-    "src/main.py", "main.py", "app.py",
-    "main.go", "cmd/main.go",
-    "src/main.rs", "src/lib.rs",
-  ].filter((e) => fs.existsSync(path.join(dir, e)));
-  if (entries.length) detail.push(`入口: ${entries.slice(0, 3).join(", ")}`);
-
-  const summary = facts.filter(Boolean).join(" ").slice(0, 100) || path.basename(dir);
-  return { summary, detail: detail.join("\n"), key_files: entries.slice(0, 5) };
-}
+import {
+  appendEvent,
+  appendWorklog,
+  ensureDir,
+  getPendingBacklog,
+  getTask,
+  readProjectContext,
+  readProjectMd,
+  readStack,
+  replayBacklog,
+  replayEvents,
+  scanProject,
+  writeHandoff,
+  writeProjectFiles,
+  writeStack,
+} from "./state.js";
+import type { ProjectData, Stack, Task } from "./state.js";
 
 // ──────────────────────────────────────────────
 // Tool name classifiers
@@ -606,6 +279,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           lines.push(
             ``,
             `📝 已生成 .opencode/pcp/PROJECT.md — 建议补充"现状"部分`,
+            `🌐 浏览器预览：.opencode/pcp/PROJECT.html`,
             `📝 已初始化 .opencode/pcp/WORKLOG.md — 后续操作自动记录`,
             ``,
             `此上下文将在每次对话和 compaction 时自动注入。`,
@@ -967,6 +641,54 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           }
 
           return lines.join("\n");
+        },
+      }),
+
+      pcp_handoff: tool({
+        description:
+          "按需生成交接文档 HANDOFF.md，供 ChatGPT、Claude Code、OpenCode 等无共享记忆的 AI 工具接力使用。" +
+          "内容来自 PCP 当前任务、队列、backlog、PROJECT.md 和 WORKLOG.md。",
+        args: {
+          audience: tool.schema
+            .string()
+            .optional()
+            .describe("可选：接手的工具或对象，如 Claude Code / ChatGPT"),
+          focus: tool.schema
+            .string()
+            .optional()
+            .describe("可选：本次交接重点，如“继续修复 handoff 测试”"),
+          include_backlog: tool.schema
+            .boolean()
+            .optional()
+            .describe("是否包含 backlog 待决项，默认 true"),
+        },
+        async execute({ audience, focus, include_backlog = true }, context) {
+          const dir = context.directory;
+          const { path: handoffPath, markdown } = writeHandoff(dir, {
+            audience,
+            focus,
+            include_backlog,
+          });
+
+          appendWorklog(
+            dir,
+            `🤝 生成 HANDOFF.md${focus ? `（重点：${focus}）` : ""}`,
+          );
+
+          const preview = markdown
+            .split("\n")
+            .slice(0, 12)
+            .join("\n");
+
+          return [
+            `🤝 已生成交接文档：${handoffPath}`,
+            "",
+            "用途：把当前 PCP 状态压缩成可直接交给下一个 AI 的上下文。",
+            "内容：当前任务、进展、未完成项、backlog、最近事件、下一步建议。",
+            "",
+            "预览：",
+            preview,
+          ].join("\n");
         },
       }),
 

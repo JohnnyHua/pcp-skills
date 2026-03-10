@@ -34,7 +34,7 @@ npx skills add JohnnyHua/pcp-skills
 
 | 组件 | 类型 | 用途 |
 |------|------|------|
-| `pcp.ts` | Plugin | 12 个工具 + 自动生命周期 hooks + 全局上下文注入 |
+| `pcp.ts` | Plugin | 13 个工具 + 自动生命周期 hooks + 全局上下文注入 |
 | `pcp-intake` | Skill | 将已有项目接入 PCP（5 步引导流程） |
 | `pcp-sprint-review` | Skill | Sprint 结束后逐条 review Backlog |
 | `pcp-setup` | Skill | 30 秒完成全部 PCP 组件安装 |
@@ -73,6 +73,13 @@ Agent："[B001] Add OAuth — 加入下一个 Sprint？A) 是  B) 以后  C) 忽
 Agent：pcp_promote("B001") → 加入当前 Sprint 作为子任务 T006
 ```
 
+### 跨工具交接
+```
+用户："给 Claude Code 生成一个 handoff"
+Agent：调用 pcp_handoff(audience="Claude Code", focus="继续当前任务")
+  → 写入 .opencode/pcp/HANDOFF.md，包含当前任务、进展、backlog、最近事件和下一步建议
+```
+
 ## 工具参考
 
 | 工具 | 说明 |
@@ -84,6 +91,7 @@ Agent：pcp_promote("B001") → 加入当前 Sprint 作为子任务 T006
 | `pcp_done` | 完成当前任务（自动推进队列中下一个） |
 | `pcp_pivot` | 放弃当前任务并记录原因，转向新方向 |
 | `pcp_status` | 查看当前任务、队列和 Backlog |
+| `pcp_handoff` | 为另一个 AI 工具或接手者生成 `.opencode/pcp/HANDOFF.md` |
 | `pcp_capture` | 将需求存入 Backlog（当前不执行） |
 | `pcp_backlog` | 列出所有待处理的 Backlog 条目 |
 | `pcp_promote` | 将 Backlog 条目提升为当前 Sprint 子任务 |
@@ -96,11 +104,25 @@ Agent：pcp_promote("B001") → 加入当前 Sprint 作为子任务 T006
 - macOS 或 Linux（Windows 需手动安装）
 - Bun 或 Node.js（用于编译插件）
 
+## 本地开发
+
+```bash
+npm install
+npm run typecheck
+npm test
+npm run check
+```
+
+`npm run check` 是最小本地校验入口：TypeScript 类型检查 + handoff 冒烟测试。
+
 ## 数据存储
 
 PCP 所有数据本地存储在 `{项目目录}/.opencode/pcp/`：
 - `events.jsonl` — 追加写入的事件日志（完整历史）
 - `stack.json` — 当前状态缓存（含 ready_tasks 队列）
+- `WORKLOG.md` — 供 `pcp_handoff` 汇总的时间线工作记录
+- `PROJECT.md` / `PROJECT.json` — 项目基线与现状快照
+- `HANDOFF.md` — 按需生成的跨工具上下文交接文档
 
 数据不会离开你的机器。
 
