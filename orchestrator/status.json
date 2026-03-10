@@ -1,8 +1,8 @@
 {
   "current_sprint": null,
-  "last_completed_sprint": "SPRINT-2026-03-10-NAMING",
+  "last_completed_sprint": "SPRINT-2026-03-10-STRUCTURE",
   "pending_sprint": null,
   "pending_goal": null,
-  "last_run_at": "2026-03-10T14:35:00+01:00",
-  "notes": "Confirmed PCP naming as Progress Control Plane and added the naming rationale to the positioning documentation."
+  "last_run_at": "2026-03-10T14:50:00+01:00",
+  "notes": "Created feature/repo-structure-cleanup and reorganized documentation layout by removing the duplicate Chinese README and moving PCP architecture docs under docs/architecture."
 }

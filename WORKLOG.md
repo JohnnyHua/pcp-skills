@@ -8,3 +8,4 @@
 - 2026-03-10 14:10 Added Concern Log, Handoff/Intake, and host compatibility documentation, including the rule that future architecture concerns default to Concern Log unless explicitly moved to backlog.
 - 2026-03-10 14:25 Added a runtime implementation roadmap that sequences PCP work from TaskCard persistence through plan compilation, lifecycle, intake, Concern Log, and host compatibility.
 - 2026-03-10 14:35 Documented the naming rationale for PCP as Progress Control Plane in the positioning doc.
+- 2026-03-10 14:50 Created `feature/repo-structure-cleanup`, removed duplicate `README-zh.md`, and grouped PCP architecture docs under `docs/architecture/`.
