@@ -34,6 +34,7 @@
 3. 先做标准化与编译，不和外部 planner 抢规划权
 4. 新出现的未来问题，默认进入 Concern Log，除非明确放入 backlog
 5. 用户体验应尽量无感，复杂性由 runtime 吃掉
+6. 每个 sprint 的 `Open risks` 只作为本轮摘要；需要后续处理的项应在 sprint 结束时转入 backlog，并重新排优先级
 
 ## 三、阶段划分
 
@@ -123,14 +124,22 @@
 优先项：
 
 1. Concern Log 数据结构
-2. 触发条件
+2. tags 与触发条件
 3. 与 TaskCard / Plan / Handoff 的关联方式
 4. 进入某阶段时自动拉出相关 concern
+5. 把 sprint `Open risks` 与 backlog 回顾流程接起来
 
 完成标志：
 
 - 架构担忧不会被遗忘
 - 系统在进入相关阶段时能重新提醒用户和 agent
+- 与 sprint review 的 backlog 重新排优先级流程打通
+
+当前进度：
+
+- 已完成最小 Concern 持久化对象与索引
+- 已提供 `pcp_concern_capture` / `pcp_concern_list` / `pcp_concern_match`
+- 自动触发、自动关闭、与 handoff/intake 的联动仍未实现
 
 ### Phase 6：Host Compatibility
 
@@ -156,6 +165,9 @@
 - 独立的测试/审核子系统
 - 项目完成后的技术总结归档系统
 - 多宿主统一入口层
+- hook / runtime 调试日志与解释层
+- Delivery Bundle 的“专业版 / 中文口语版”双模板
+- 更厚的人审 / 机审 gate 和产物预览层
 
 这些内容应先进入 Concern Log 或 backlog，等基础 runtime 稳定后再进入开发。
 
@@ -165,6 +177,7 @@
 
 1. 后续是否把“规划 + plan”融合进 PCP，让系统更自循环
 2. 是否补一个更独立的测试/审核环节，而不只是 review gate
+3. 是否增加 hook / runtime 调试日志与解释层，让 AI 能把触发原因和执行路径解释给用户看
 
 这两项当前不进入立即开发，先作为 Concern Log 保留。
 
@@ -197,6 +210,7 @@
 
 - 新需求继续追加
 - 新 concern 继续登记
+- 每轮 `Open risks` 需要决定是转入 backlog、转入 concern，还是当轮关闭
 - 发现边界问题继续修正
 - 但不再每次从零讨论 PCP 是什么
 

@@ -4,9 +4,22 @@ import * as path from "node:path";
 export interface Stack {
   next_id: number;
   backlog_next_id: number;
+  plan_next_id?: number;
+  blueprint_next_id?: number;
   active_stack: string[];
   active_task_id: string | null;
   ready_tasks: { id: string; title: string }[];
+  completion_mode?: CompletionMode;
+  pending_completion?: PendingCompletion | null;
+}
+
+export type CompletionMode = "auto" | "gated";
+
+export interface PendingCompletion {
+  task_id: string;
+  review: TaskReviewDecision;
+  via: TaskCompletionVia;
+  requested_at: string;
 }
 
 export interface PcpEvent {
@@ -62,6 +75,32 @@ export interface ProjectData {
   updated_at: string;
 }
 
+export interface ConcernInput {
+  title: string;
+  detail: string;
+  tags: string[];
+}
+
+export interface ConcernRecord {
+  id: string;
+  title: string;
+  detail: string;
+  tags: string[];
+  status: "open" | "acknowledged" | "triggered" | "resolved" | "dismissed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConcernIndex {
+  ids: string[];
+  updated_at: string;
+}
+
+export interface ConcernMatch {
+  concern: ConcernRecord;
+  matched_tags: string[];
+}
+
 export interface HandoffOptions {
   audience?: string;
   focus?: string;
@@ -70,8 +109,266 @@ export interface HandoffOptions {
   max_worklog_entries?: number;
 }
 
+export interface HandoffSnapshot {
+  generated_at: string;
+  audience: string | null;
+  focus: string | null;
+  project: {
+    name: string | null;
+    summary: string | null;
+    context: string | null;
+    status: string | null;
+    key_files: string[];
+  };
+  main_task: {
+    id: string;
+    title: string;
+    lifecycle_status: TaskCardLifecycleStatus | null;
+    review_status: TaskCardReviewStatus | null;
+    git_status: TaskCardGitStatus | null;
+    handoff_status: TaskCardHandoffStatus | null;
+  } | null;
+  active_task: {
+    id: string;
+    title: string;
+    lifecycle_status: TaskCardLifecycleStatus | null;
+    review_status: TaskCardReviewStatus | null;
+    git_status: TaskCardGitStatus | null;
+    handoff_status: TaskCardHandoffStatus | null;
+  } | null;
+  queue: { id: string; title: string }[];
+  backlog: BacklogItem[];
+  recent_events: string[];
+  recent_worklog: string[];
+  resume_prompt: string | null;
+  next_steps: string[];
+}
+
+export interface IntakeResult {
+  source_path: string;
+  active_task_id: string | null;
+  queue_count: number;
+}
+
+export interface PlanInput {
+  source: string;
+  title: string;
+  tasks: string[];
+}
+
+export interface PlanRecord {
+  id: string;
+  source: string;
+  title: string;
+  raw_tasks: string[];
+  task_ids: string[];
+  activated_task_id: string | null;
+  queued_task_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanIndex {
+  ids: string[];
+  updated_at: string;
+}
+
+export interface TaskProposalInput {
+  title: string;
+  detail: string;
+  kind?: "task" | "subtask";
+  parent_task_id?: string | null;
+  source_blueprint_id?: string | null;
+  source_step_index?: number | null;
+}
+
+export interface TaskProposalRecord {
+  id: string;
+  title: string;
+  detail: string;
+  kind: "task" | "subtask";
+  parent_task_id: string | null;
+  source_blueprint_id: string | null;
+  source_step_index: number | null;
+  status: "proposed" | "approved" | "rejected";
+  approved_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskProposalIndex {
+  ids: string[];
+  updated_at: string;
+}
+
+export interface BlueprintInput {
+  title: string;
+  steps: string[];
+}
+
+export interface BlueprintRecord {
+  id: string;
+  task_id: string;
+  title: string;
+  steps: string[];
+  status: "active" | "archived";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BlueprintIndex {
+  ids: string[];
+  updated_at: string;
+}
+
+export type TaskReviewDecision = "yes" | "no" | "skip";
+export type TaskCompletionVia = "manual" | "git_commit";
+
+export interface TaskCompletionResult {
+  doneId: string;
+  parentId: string | null;
+  nextTaskId: string | null;
+  outcome: "returned_to_parent" | "advanced" | "all_done";
+}
+
+export interface PendingCompletionResult {
+  taskId: string;
+  review: TaskReviewDecision;
+  via: TaskCompletionVia;
+}
+
+export type TaskCardLifecycleStatus =
+  | "draft"
+  | "ready"
+  | "doing"
+  | "blocked"
+  | "done"
+  | "pivoted"
+  | "dropped";
+
+export type TaskCardReviewStatus =
+  | "pending"
+  | "human_requested"
+  | "machine_requested"
+  | "skipped"
+  | "approved"
+  | "rejected";
+
+export type TaskCardGitStatus =
+  | "none"
+  | "pending"
+  | "committed"
+  | "pushed";
+
+export type TaskCardHandoffStatus =
+  | "none"
+  | "prepared"
+  | "handed_off"
+  | "resumed";
+
+export interface TaskCard {
+  id: string;
+  type: "main" | "sub";
+  title: string;
+  detail: string;
+  acceptance: string[];
+  created_from_goal: string | null;
+  created_from_plan: string | null;
+  created_by: string;
+  parent_id: string | null;
+  children: string[];
+  hard_dependencies: string[];
+  soft_dependencies: string[];
+  blocked_by: string[];
+  current_blueprint_id: string | null;
+  lifecycle_status: TaskCardLifecycleStatus;
+  review_status: TaskCardReviewStatus;
+  git_status: TaskCardGitStatus;
+  handoff_status: TaskCardHandoffStatus;
+  queue_slot: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  last_actor: string | null;
+  user_additions: string[];
+  notes: string[];
+  agent_suggestions: string[];
+  tool_hints: string[];
+  artifacts: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskCardIndex {
+  ids: string[];
+  updated_at: string;
+}
+
 export function pcpDir(dir: string): string {
   return path.join(dir, ".opencode", "pcp");
+}
+
+export function plansDir(dir: string): string {
+  return path.join(pcpDir(dir), "plans");
+}
+
+export function proposalsDir(dir: string): string {
+  return path.join(pcpDir(dir), "proposals");
+}
+
+export function blueprintsDir(dir: string): string {
+  return path.join(pcpDir(dir), "blueprints");
+}
+
+export function concernsDir(dir: string): string {
+  return path.join(pcpDir(dir), "concerns");
+}
+
+export function taskcardsDir(dir: string): string {
+  return path.join(pcpDir(dir), "taskcards");
+}
+
+function planPath(dir: string, id: string): string {
+  return path.join(plansDir(dir), `${id}.json`);
+}
+
+function planIndexPath(dir: string): string {
+  return path.join(plansDir(dir), "index.json");
+}
+
+function proposalPath(dir: string, id: string): string {
+  return path.join(proposalsDir(dir), `${id}.json`);
+}
+
+function proposalIndexPath(dir: string): string {
+  return path.join(proposalsDir(dir), "index.json");
+}
+
+function blueprintPath(dir: string, id: string): string {
+  return path.join(blueprintsDir(dir), `${id}.json`);
+}
+
+function blueprintIndexPath(dir: string): string {
+  return path.join(blueprintsDir(dir), "index.json");
+}
+
+function concernPath(dir: string, id: string): string {
+  return path.join(concernsDir(dir), `${id}.json`);
+}
+
+function concernIndexPath(dir: string): string {
+  return path.join(concernsDir(dir), "index.json");
+}
+
+function handoffJsonPath(dir: string): string {
+  return path.join(pcpDir(dir), "HANDOFF.json");
+}
+
+function taskcardPath(dir: string, id: string): string {
+  return path.join(taskcardsDir(dir), `${id}.json`);
+}
+
+function taskcardIndexPath(dir: string): string {
+  return path.join(taskcardsDir(dir), "index.json");
 }
 
 export function ensureDir(dir: string): void {
@@ -84,23 +381,60 @@ export function ensureDir(dir: string): void {
 export function readStack(dir: string): Stack {
   const p = path.join(pcpDir(dir), "stack.json");
   if (!fs.existsSync(p)) {
-    return { next_id: 1, backlog_next_id: 1, active_stack: [], active_task_id: null, ready_tasks: [] };
+    return {
+      next_id: 1,
+      backlog_next_id: 1,
+      plan_next_id: 1,
+      blueprint_next_id: 1,
+      active_stack: [],
+      active_task_id: null,
+      ready_tasks: [],
+      completion_mode: "gated",
+      pending_completion: null,
+    };
   }
   try {
     const s = JSON.parse(fs.readFileSync(p, "utf8")) as Stack;
     if (s.backlog_next_id === undefined) s.backlog_next_id = 1;
+    if (s.plan_next_id === undefined) s.plan_next_id = 1;
+    if (s.blueprint_next_id === undefined) s.blueprint_next_id = 1;
     if (s.ready_tasks === undefined) s.ready_tasks = [];
+    if (s.completion_mode === undefined) s.completion_mode = "gated";
+    if (s.pending_completion === undefined) s.pending_completion = null;
     return s;
   } catch {
-    return { next_id: 1, backlog_next_id: 1, active_stack: [], active_task_id: null, ready_tasks: [] };
+    return {
+      next_id: 1,
+      backlog_next_id: 1,
+      plan_next_id: 1,
+      blueprint_next_id: 1,
+      active_stack: [],
+      active_task_id: null,
+      ready_tasks: [],
+      completion_mode: "gated",
+      pending_completion: null,
+    };
   }
 }
 
 export function writeStack(dir: string, s: Stack): void {
+  if (s.plan_next_id === undefined) {
+    s.plan_next_id = 1;
+  }
+  if (s.blueprint_next_id === undefined) {
+    s.blueprint_next_id = 1;
+  }
+  if (s.completion_mode === undefined) {
+    s.completion_mode = "gated";
+  }
+  if (s.pending_completion === undefined) {
+    s.pending_completion = null;
+  }
   fs.writeFileSync(
     path.join(pcpDir(dir), "stack.json"),
     JSON.stringify(s, null, 2),
   );
+  reconcileTaskCards(dir);
 }
 
 export function appendEvent(dir: string, event: PcpEvent): void {
@@ -284,6 +618,804 @@ export function readProjectContext(dir: string): string | null {
     }
   }
   return latest;
+}
+
+export function readTaskCard(dir: string, id: string): TaskCard | null {
+  const cardPath = taskcardPath(dir, id);
+  if (!fs.existsSync(cardPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(cardPath, "utf8")) as TaskCard;
+  } catch {
+    return null;
+  }
+}
+
+export function readPlan(dir: string, id: string): PlanRecord | null {
+  const recordPath = planPath(dir, id);
+  if (!fs.existsSync(recordPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(recordPath, "utf8")) as PlanRecord;
+  } catch {
+    return null;
+  }
+}
+
+export function readTaskProposal(dir: string, id: string): TaskProposalRecord | null {
+  const recordPath = proposalPath(dir, id);
+  if (!fs.existsSync(recordPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(recordPath, "utf8")) as TaskProposalRecord;
+  } catch {
+    return null;
+  }
+}
+
+export function readBlueprint(dir: string, id: string): BlueprintRecord | null {
+  const recordPath = blueprintPath(dir, id);
+  if (!fs.existsSync(recordPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(recordPath, "utf8")) as BlueprintRecord;
+  } catch {
+    return null;
+  }
+}
+
+export function readConcern(dir: string, id: string): ConcernRecord | null {
+  const recordPath = concernPath(dir, id);
+  if (!fs.existsSync(recordPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(recordPath, "utf8")) as ConcernRecord;
+  } catch {
+    return null;
+  }
+}
+
+export function listTaskProposals(dir: string): TaskProposalRecord[] {
+  const recordsPath = proposalsDir(dir);
+  if (!fs.existsSync(recordsPath)) return [];
+
+  return fs.readdirSync(recordsPath)
+    .filter((file) => file.endsWith(".json") && file !== "index.json")
+    .flatMap((file) => {
+      try {
+        return [
+          JSON.parse(fs.readFileSync(path.join(recordsPath, file), "utf8")) as TaskProposalRecord,
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => {
+      const rank = (proposal: TaskProposalRecord): number => {
+        if (proposal.status === "proposed") return 0;
+        if (proposal.status === "approved") return 1;
+        return 2;
+      };
+      const byStatus = rank(a) - rank(b);
+      if (byStatus !== 0) return byStatus;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+export function listBlueprints(dir: string): BlueprintRecord[] {
+  const recordsPath = blueprintsDir(dir);
+  if (!fs.existsSync(recordsPath)) return [];
+
+  return fs.readdirSync(recordsPath)
+    .filter((file) => file.endsWith(".json") && file !== "index.json")
+    .flatMap((file) => {
+      try {
+        return [
+          JSON.parse(fs.readFileSync(path.join(recordsPath, file), "utf8")) as BlueprintRecord,
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function listPlans(dir: string): PlanRecord[] {
+  const recordsPath = plansDir(dir);
+  if (!fs.existsSync(recordsPath)) return [];
+
+  return fs.readdirSync(recordsPath)
+    .filter((file) => file.endsWith(".json") && file !== "index.json")
+    .flatMap((file) => {
+      try {
+        return [
+          JSON.parse(fs.readFileSync(path.join(recordsPath, file), "utf8")) as PlanRecord,
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function listTaskCards(dir: string): TaskCard[] {
+  const cardsPath = taskcardsDir(dir);
+  if (!fs.existsSync(cardsPath)) return [];
+
+  return fs.readdirSync(cardsPath)
+    .filter((file) => file.endsWith(".json") && file !== "index.json")
+    .flatMap((file) => {
+      try {
+        return [
+          JSON.parse(fs.readFileSync(path.join(cardsPath, file), "utf8")) as TaskCard,
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function listConcerns(dir: string): ConcernRecord[] {
+  const recordsPath = concernsDir(dir);
+  if (!fs.existsSync(recordsPath)) return [];
+
+  return fs.readdirSync(recordsPath)
+    .filter((file) => file.endsWith(".json") && file !== "index.json")
+    .flatMap((file) => {
+      try {
+        return [
+          JSON.parse(fs.readFileSync(path.join(recordsPath, file), "utf8")) as ConcernRecord,
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function writeTaskProposalIndex(dir: string, ids: string[]): void {
+  ensureDir(dir);
+  const recordsPath = proposalsDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  const index: TaskProposalIndex = {
+    ids,
+    updated_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(proposalIndexPath(dir), JSON.stringify(index, null, 2));
+}
+
+function writeBlueprintIndex(dir: string, ids: string[]): void {
+  ensureDir(dir);
+  const recordsPath = blueprintsDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  const index: BlueprintIndex = {
+    ids,
+    updated_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(blueprintIndexPath(dir), JSON.stringify(index, null, 2));
+}
+
+function writePlanIndex(dir: string, ids: string[]): void {
+  ensureDir(dir);
+  const recordsPath = plansDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  const index: PlanIndex = {
+    ids,
+    updated_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(planIndexPath(dir), JSON.stringify(index, null, 2));
+}
+
+function writeConcernIndex(dir: string, ids: string[]): void {
+  ensureDir(dir);
+  const recordsPath = concernsDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  const index: ConcernIndex = {
+    ids,
+    updated_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(concernIndexPath(dir), JSON.stringify(index, null, 2));
+}
+
+function writeTaskProposalFile(dir: string, proposal: TaskProposalRecord): void {
+  ensureDir(dir);
+  const recordsPath = proposalsDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  fs.writeFileSync(proposalPath(dir, proposal.id), JSON.stringify(proposal, null, 2));
+}
+
+function writeBlueprintFile(dir: string, blueprint: BlueprintRecord): void {
+  ensureDir(dir);
+  const recordsPath = blueprintsDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  fs.writeFileSync(blueprintPath(dir, blueprint.id), JSON.stringify(blueprint, null, 2));
+}
+
+function writePlanFile(dir: string, plan: PlanRecord): void {
+  ensureDir(dir);
+  const recordsPath = plansDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  fs.writeFileSync(planPath(dir, plan.id), JSON.stringify(plan, null, 2));
+}
+
+function writeConcernFile(dir: string, concern: ConcernRecord): void {
+  ensureDir(dir);
+  const recordsPath = concernsDir(dir);
+  if (!fs.existsSync(recordsPath)) {
+    fs.mkdirSync(recordsPath, { recursive: true });
+  }
+  fs.writeFileSync(concernPath(dir, concern.id), JSON.stringify(concern, null, 2));
+}
+
+function writeTaskCardIndex(dir: string, ids: string[]): void {
+  ensureDir(dir);
+  const cardsPath = taskcardsDir(dir);
+  if (!fs.existsSync(cardsPath)) {
+    fs.mkdirSync(cardsPath, { recursive: true });
+  }
+  const index: TaskCardIndex = {
+    ids,
+    updated_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(taskcardIndexPath(dir), JSON.stringify(index, null, 2));
+}
+
+function writeTaskCardFile(dir: string, card: TaskCard): void {
+  ensureDir(dir);
+  const cardsPath = taskcardsDir(dir);
+  if (!fs.existsSync(cardsPath)) {
+    fs.mkdirSync(cardsPath, { recursive: true });
+  }
+  fs.writeFileSync(taskcardPath(dir, card.id), JSON.stringify(card, null, 2));
+}
+
+export function createConcern(dir: string, input: ConcernInput): ConcernRecord {
+  ensureDir(dir);
+  const concerns = listConcerns(dir);
+  const id = `C${String(concerns.length + 1).padStart(3, "0")}`;
+  const now = new Date().toISOString();
+  const concern: ConcernRecord = {
+    id,
+    title: input.title,
+    detail: input.detail,
+    tags: [...input.tags],
+    status: "open",
+    created_at: now,
+    updated_at: now,
+  };
+  writeConcernFile(dir, concern);
+  writeConcernIndex(dir, listConcerns(dir).map((item) => item.id));
+  return concern;
+}
+
+export function matchConcerns(dir: string, tags: string[]): ConcernMatch[] {
+  const queryTags = new Set(tags);
+  return listConcerns(dir)
+    .map((concern) => {
+      const matchedTags = concern.tags.filter((tag) => queryTags.has(tag));
+      return { concern, matched_tags: matchedTags };
+    })
+    .filter((item) => item.matched_tags.length > 0)
+    .sort((a, b) => {
+      const byMatches = b.matched_tags.length - a.matched_tags.length;
+      if (byMatches !== 0) return byMatches;
+      return a.concern.id.localeCompare(b.concern.id);
+    });
+}
+
+export function writeTaskCard(dir: string, card: TaskCard): void {
+  writeTaskCardFile(dir, {
+    ...card,
+    updated_at: new Date().toISOString(),
+  });
+  writeTaskCardIndex(dir, listTaskCards(dir).map((item) => item.id));
+}
+
+export function createBlueprint(dir: string, input: BlueprintInput): BlueprintRecord {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  if (!stack.active_task_id) {
+    throw new Error("No active task");
+  }
+
+  const activeCard = readTaskCard(dir, stack.active_task_id);
+  if (!activeCard || activeCard.lifecycle_status !== "doing") {
+    throw new Error("Blueprint requires an active doing task");
+  }
+
+  const now = new Date().toISOString();
+  const blueprintId = `BP${String(stack.blueprint_next_id ?? 1).padStart(3, "0")}`;
+
+  if (activeCard.current_blueprint_id) {
+    const previous = readBlueprint(dir, activeCard.current_blueprint_id);
+    if (previous) {
+      writeBlueprintFile(dir, {
+        ...previous,
+        status: "archived",
+        updated_at: now,
+      });
+    }
+  }
+
+  const blueprint: BlueprintRecord = {
+    id: blueprintId,
+    task_id: stack.active_task_id,
+    title: input.title,
+    steps: [...input.steps],
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  };
+  writeBlueprintFile(dir, blueprint);
+  writeBlueprintIndex(dir, listBlueprints(dir).map((item) => item.id));
+  stack.blueprint_next_id = (stack.blueprint_next_id ?? 1) + 1;
+  writeStack(dir, stack);
+  writeTaskCard(dir, {
+    ...activeCard,
+    current_blueprint_id: blueprint.id,
+    updated_at: now,
+  });
+  return blueprint;
+}
+
+export function createTaskProposal(dir: string, input: TaskProposalInput): TaskProposalRecord {
+  ensureDir(dir);
+  const proposals = listTaskProposals(dir);
+  const id = `TP${String(proposals.length + 1).padStart(3, "0")}`;
+  const now = new Date().toISOString();
+  const proposal: TaskProposalRecord = {
+    id,
+    title: input.title,
+    detail: input.detail,
+    kind: input.kind ?? "task",
+    parent_task_id: input.parent_task_id ?? null,
+    source_blueprint_id: input.source_blueprint_id ?? null,
+    source_step_index: input.source_step_index ?? null,
+    status: "proposed",
+    approved_task_id: null,
+    created_at: now,
+    updated_at: now,
+  };
+  writeTaskProposalFile(dir, proposal);
+  writeTaskProposalIndex(dir, listTaskProposals(dir).map((item) => item.id));
+  return proposal;
+}
+
+export function createBlueprintSubtaskProposal(
+  dir: string,
+  input: { step_index: number; detail?: string },
+): TaskProposalRecord {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  if (!stack.active_task_id) {
+    throw new Error("No active task");
+  }
+
+  const activeCard = readTaskCard(dir, stack.active_task_id);
+  if (!activeCard || activeCard.lifecycle_status !== "doing") {
+    throw new Error("Blueprint subtask proposal requires an active doing task");
+  }
+  if (!activeCard.current_blueprint_id) {
+    throw new Error("Current task has no blueprint");
+  }
+
+  const blueprint = readBlueprint(dir, activeCard.current_blueprint_id);
+  if (!blueprint || blueprint.status !== "active") {
+    throw new Error("Active blueprint not found");
+  }
+
+  const index = input.step_index - 1;
+  if (index < 0 || index >= blueprint.steps.length) {
+    throw new Error("Blueprint step index out of range");
+  }
+
+  const stepTitle = blueprint.steps[index];
+  const detail =
+    input.detail ??
+    `来自蓝图 ${blueprint.id} 第 ${input.step_index} 步：${stepTitle}`;
+
+  return createTaskProposal(dir, {
+    title: stepTitle,
+    detail,
+    kind: "subtask",
+    parent_task_id: activeCard.id,
+    source_blueprint_id: blueprint.id,
+    source_step_index: input.step_index,
+  });
+}
+
+export function shouldSuggestBlueprint(
+  activeCard: TaskCard | null,
+  pendingProposals: TaskProposalRecord[],
+): boolean {
+  if (!activeCard) return false;
+  if (activeCard.lifecycle_status !== "doing") return false;
+  if (activeCard.current_blueprint_id) return false;
+
+  if (activeCard.title.trim().length >= 12) return true;
+  if (activeCard.detail.trim().length >= 40) return true;
+  if (activeCard.acceptance.length >= 2) return true;
+  if (pendingProposals.some((item) => item.parent_task_id === activeCard.id)) return true;
+
+  return false;
+}
+
+export function approveTaskProposal(
+  dir: string,
+  proposalId: string,
+): { proposal_id: string; task_id: string } {
+  ensureDir(dir);
+  const proposal = readTaskProposal(dir, proposalId);
+  if (!proposal) {
+    throw new Error("Proposal not found");
+  }
+  if (proposal.status !== "proposed") {
+    throw new Error("Proposal is not pending");
+  }
+
+  const stack = readStack(dir);
+  const taskId = `T${String(stack.next_id).padStart(3, "0")}`;
+  if (proposal.kind === "subtask") {
+    if (!proposal.parent_task_id) {
+      throw new Error("Subtask proposal requires parent_task_id");
+    }
+    const tasks = replayEvents(dir);
+    const parentTitle = getTask(tasks, proposal.parent_task_id)?.title ?? proposal.parent_task_id;
+    appendEvent(dir, {
+      e: "resume_set",
+      id: proposal.parent_task_id,
+      prompt: `准备进入子任务【${proposal.title}】，完成后继续主任务：${parentTitle}。`,
+      ts: Date.now(),
+    });
+    appendEvent(dir, {
+      e: "sub",
+      id: taskId,
+      parent: proposal.parent_task_id,
+      title: proposal.title,
+      ts: Date.now(),
+    });
+  } else {
+    appendEvent(dir, { e: "created", id: taskId, type: "main", title: proposal.title, ts: Date.now() });
+  }
+  stack.next_id++;
+
+  if (proposal.kind === "subtask") {
+    if (!proposal.parent_task_id) {
+      throw new Error("Subtask proposal requires parent_task_id");
+    }
+    const parentIndex = stack.active_stack.indexOf(proposal.parent_task_id);
+    if (parentIndex === -1) {
+      throw new Error("Parent task is not active");
+    }
+    stack.active_stack = [...stack.active_stack.slice(0, parentIndex + 1), taskId];
+    stack.active_task_id = taskId;
+  } else if (stack.active_task_id) {
+    stack.ready_tasks = [...stack.ready_tasks, { id: taskId, title: proposal.title }];
+  } else {
+    stack.active_stack = [taskId];
+    stack.active_task_id = taskId;
+  }
+
+  writeTaskProposalFile(dir, {
+    ...proposal,
+    status: "approved",
+    approved_task_id: taskId,
+    updated_at: new Date().toISOString(),
+  });
+  writeTaskProposalIndex(dir, listTaskProposals(dir).map((item) => item.id));
+  writeStack(dir, stack);
+
+  return { proposal_id: proposalId, task_id: taskId };
+}
+
+export function rejectTaskProposal(dir: string, proposalId: string): TaskProposalRecord {
+  ensureDir(dir);
+  const proposal = readTaskProposal(dir, proposalId);
+  if (!proposal) {
+    throw new Error("Proposal not found");
+  }
+  const updated: TaskProposalRecord = {
+    ...proposal,
+    status: "rejected",
+    updated_at: new Date().toISOString(),
+  };
+  writeTaskProposalFile(dir, updated);
+  writeTaskProposalIndex(dir, listTaskProposals(dir).map((item) => item.id));
+  return updated;
+}
+
+function deriveLifecycleStatus(task: Task, stack: Stack): TaskCardLifecycleStatus {
+  if (task.pivoted) return "pivoted";
+  if (task.done) return "done";
+  if (task.id === stack.active_task_id) return "doing";
+  if (stack.active_stack.includes(task.id)) return "doing";
+  if (stack.ready_tasks.some((queued) => queued.id === task.id)) return "ready";
+  return "draft";
+}
+
+function deriveReviewStatus(decision: TaskReviewDecision): TaskCardReviewStatus {
+  if (decision === "yes") return "approved";
+  if (decision === "no") return "machine_requested";
+  return "skipped";
+}
+
+function applyPendingCompletionState(
+  dir: string,
+  taskId: string,
+  options: { review: TaskReviewDecision; via: TaskCompletionVia },
+): void {
+  const existingCard = readTaskCard(dir, taskId);
+  if (!existingCard) return;
+
+  writeTaskCard(dir, {
+    ...existingCard,
+    lifecycle_status: "doing",
+    review_status: deriveReviewStatus(options.review),
+    git_status: options.via === "git_commit" ? "committed" : "pending",
+    last_actor: options.via === "git_commit" ? "git-hook" : "pcp_done",
+  });
+}
+
+function completeActiveTaskInternal(
+  dir: string,
+  options: { review: TaskReviewDecision; via: TaskCompletionVia },
+): TaskCompletionResult {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  if (!stack.active_task_id) {
+    throw new Error("No active task");
+  }
+
+  const doneId = stack.active_task_id;
+  const parentIdBeforePop =
+    stack.active_stack.length > 1 ? stack.active_stack[stack.active_stack.length - 2] : null;
+  const existingCard = readTaskCard(dir, doneId);
+  const now = new Date().toISOString();
+
+  if (existingCard) {
+    writeTaskCard(dir, {
+      ...existingCard,
+      lifecycle_status: "done",
+      review_status: deriveReviewStatus(options.review),
+      git_status: options.via === "git_commit" ? "committed" : "pending",
+      completed_at: now,
+      last_actor: options.via === "git_commit" ? "git-hook" : "pcp_done",
+    });
+  }
+
+  appendEvent(dir, { e: "done", id: doneId, ts: Date.now() });
+  stack.active_stack.pop();
+  stack.pending_completion = null;
+
+  if (stack.active_stack.length > 0) {
+    const parentId = stack.active_stack[stack.active_stack.length - 1];
+    stack.active_task_id = parentId;
+    writeStack(dir, stack);
+    return {
+      doneId,
+      parentId,
+      nextTaskId: null,
+      outcome: "returned_to_parent",
+    };
+  }
+
+  if (stack.ready_tasks.length > 0) {
+    const next = stack.ready_tasks.shift()!;
+    stack.active_stack = [next.id];
+    stack.active_task_id = next.id;
+    writeStack(dir, stack);
+    return {
+      doneId,
+      parentId: parentIdBeforePop,
+      nextTaskId: next.id,
+      outcome: "advanced",
+    };
+  }
+
+  stack.active_task_id = null;
+  writeStack(dir, stack);
+  return {
+    doneId,
+    parentId: parentIdBeforePop,
+    nextTaskId: null,
+    outcome: "all_done",
+  };
+}
+
+export function setCompletionMode(dir: string, mode: CompletionMode): Stack {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  stack.completion_mode = mode;
+  writeStack(dir, stack);
+  return stack;
+}
+
+export function requestTaskCompletion(
+  dir: string,
+  options: { review: TaskReviewDecision; via: TaskCompletionVia },
+): PendingCompletionResult {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  if (!stack.active_task_id) {
+    throw new Error("No active task");
+  }
+
+  stack.pending_completion = {
+    task_id: stack.active_task_id,
+    review: options.review,
+    via: options.via,
+    requested_at: new Date().toISOString(),
+  };
+  writeStack(dir, stack);
+  applyPendingCompletionState(dir, stack.active_task_id, options);
+
+  return {
+    taskId: stack.active_task_id,
+    review: options.review,
+    via: options.via,
+  };
+}
+
+export function approvePendingCompletion(dir: string): TaskCompletionResult {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  const pending = stack.pending_completion;
+  if (!pending || !stack.active_task_id || pending.task_id !== stack.active_task_id) {
+    throw new Error("No pending completion");
+  }
+  return completeActiveTaskInternal(dir, {
+    review: pending.review,
+    via: pending.via,
+  });
+}
+
+export function compilePlan(
+  dir: string,
+  input: PlanInput,
+): { plan: PlanRecord; created: { id: string; title: string }[] } {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  const now = new Date().toISOString();
+  const planId = `P${String(stack.plan_next_id ?? 1).padStart(3, "0")}`;
+  const created: { id: string; title: string }[] = [];
+
+  for (const title of input.tasks) {
+    const id = `T${String(stack.next_id).padStart(3, "0")}`;
+    appendEvent(dir, { e: "created", id, type: "main", title, ts: Date.now() });
+    created.push({ id, title });
+    stack.next_id++;
+  }
+
+  let activatedTaskId: string | null = null;
+  let queuedTaskIds: string[] = [];
+  if (created.length > 0) {
+    if (stack.active_task_id) {
+      stack.ready_tasks = [...stack.ready_tasks, ...created];
+      queuedTaskIds = created.map((task) => task.id);
+    } else {
+      const [first, ...rest] = created;
+      stack.active_stack = [first.id];
+      stack.active_task_id = first.id;
+      stack.ready_tasks = [...stack.ready_tasks, ...rest];
+      activatedTaskId = first.id;
+      queuedTaskIds = rest.map((task) => task.id);
+    }
+  }
+
+  const plan: PlanRecord = {
+    id: planId,
+    source: input.source,
+    title: input.title,
+    raw_tasks: [...input.tasks],
+    task_ids: created.map((task) => task.id),
+    activated_task_id: activatedTaskId,
+    queued_task_ids: queuedTaskIds,
+    created_at: now,
+    updated_at: now,
+  };
+
+  writePlanFile(dir, plan);
+  writePlanIndex(dir, listPlans(dir).map((item) => item.id));
+  stack.plan_next_id = (stack.plan_next_id ?? 1) + 1;
+  writeStack(dir, stack);
+
+  return { plan, created };
+}
+
+export function completeActiveTask(
+  dir: string,
+  options: { review: TaskReviewDecision; via: TaskCompletionVia },
+): TaskCompletionResult {
+  const stack = readStack(dir);
+  if ((stack.completion_mode ?? "gated") === "gated") {
+    throw new Error("Completion requires approval in gated mode");
+  }
+  return completeActiveTaskInternal(dir, options);
+}
+
+export function reconcileTaskCards(dir: string): TaskCard[] {
+  ensureDir(dir);
+  const stack = readStack(dir);
+  const tasks = replayEvents(dir);
+  const existing = new Map(listTaskCards(dir).map((card) => [card.id, card]));
+  const taskPlanMap = new Map<string, string>();
+  const childMap = new Map<string, string[]>();
+  const now = new Date().toISOString();
+
+  for (const plan of listPlans(dir)) {
+    for (const taskId of plan.task_ids) {
+      taskPlanMap.set(taskId, plan.id);
+    }
+  }
+
+  for (const task of tasks) {
+    if (!task.parent) continue;
+    const children = childMap.get(task.parent) ?? [];
+    children.push(task.id);
+    childMap.set(task.parent, children);
+  }
+
+  const cards = tasks.map((task) => {
+    const existingCard = existing.get(task.id);
+    const lifecycleStatus = deriveLifecycleStatus(task, stack);
+    const queueSlot = stack.ready_tasks.findIndex((queued) => queued.id === task.id);
+    const startedAt =
+      lifecycleStatus === "doing"
+        ? existingCard?.started_at ?? now
+        : existingCard?.started_at ?? null;
+    const completedAt =
+      lifecycleStatus === "done" || lifecycleStatus === "pivoted"
+        ? existingCard?.completed_at ?? now
+        : existingCard?.completed_at ?? null;
+
+    const card: TaskCard = {
+      id: task.id,
+      type: task.type,
+      title: existingCard?.title ?? task.title,
+      detail: existingCard?.detail ?? "",
+      acceptance: existingCard?.acceptance ?? [],
+      created_from_goal: existingCard?.created_from_goal ?? null,
+      created_from_plan: existingCard?.created_from_plan ?? taskPlanMap.get(task.id) ?? null,
+      created_by: existingCard?.created_by ?? "pcp-runtime",
+      parent_id: task.parent ?? existingCard?.parent_id ?? null,
+      children: childMap.get(task.id) ?? existingCard?.children ?? [],
+      hard_dependencies: existingCard?.hard_dependencies ?? [],
+      soft_dependencies: existingCard?.soft_dependencies ?? [],
+      blocked_by: existingCard?.blocked_by ?? [],
+      current_blueprint_id: existingCard?.current_blueprint_id ?? null,
+      lifecycle_status: lifecycleStatus,
+      review_status: existingCard?.review_status ?? "pending",
+      git_status: existingCard?.git_status ?? "none",
+      handoff_status: existingCard?.handoff_status ?? "none",
+      queue_slot: queueSlot >= 0 ? queueSlot : null,
+      started_at: startedAt,
+      completed_at: completedAt,
+      last_actor: existingCard?.last_actor ?? "pcp-runtime",
+      user_additions: existingCard?.user_additions ?? [],
+      notes: existingCard?.notes ?? [],
+      agent_suggestions: existingCard?.agent_suggestions ?? [],
+      tool_hints: existingCard?.tool_hints ?? [],
+      artifacts: existingCard?.artifacts ?? [],
+      created_at: existingCard?.created_at ?? now,
+      updated_at: now,
+    };
+
+    writeTaskCardFile(dir, card);
+    return card;
+  });
+
+  writeTaskCardIndex(dir, cards.map((card) => card.id));
+  return cards;
 }
 
 function tryRead(p: string, maxChars = 400): string | null {
@@ -559,10 +1691,142 @@ export function buildHandoffMarkdown(dir: string, options: HandoffOptions = {}):
   return lines.join("\n");
 }
 
-export function writeHandoff(dir: string, options: HandoffOptions = {}): { path: string; markdown: string } {
+export function buildHandoffSnapshot(dir: string, options: HandoffOptions = {}): HandoffSnapshot {
+  const {
+    audience,
+    focus,
+    include_backlog = true,
+    max_recent_events = 8,
+  } = options;
+  const stack = readStack(dir);
+  const tasks = replayEvents(dir);
+  const backlog = replayBacklog(dir);
+  const projectJson = readProjectJson(dir);
+  const projectMd = readProjectMd(dir);
+  const projectContext = readProjectContext(dir);
+  const mainTask = stack.active_stack[0] ? getTask(tasks, stack.active_stack[0]) : null;
+  const activeTask = stack.active_task_id ? getTask(tasks, stack.active_task_id) : null;
+  const parentTask =
+    stack.active_stack.length > 1
+      ? getTask(tasks, stack.active_stack[stack.active_stack.length - 2]!)
+      : null;
+  const pendingBacklog = include_backlog
+    ? backlog.filter((item) => item.status === "pending")
+    : [];
+  const projectStatus = extractProjectStatus(projectJson, projectMd);
+  const recentEvents = readEventLog(dir)
+    .slice(-max_recent_events)
+    .map((event) => formatEventSummary(event));
+  const recentWorklog = readWorklogEntries(dir, 6);
+  if ((mainTask && !readTaskCard(dir, mainTask.id)) || (activeTask && !readTaskCard(dir, activeTask.id))) {
+    reconcileTaskCards(dir);
+  }
+  const mainCard = mainTask ? readTaskCard(dir, mainTask.id) : null;
+  const activeCard = activeTask ? readTaskCard(dir, activeTask.id) : null;
+
+  const nextSteps: string[] = [];
+  if (activeTask) {
+    nextSteps.push(`继续当前任务 [${activeTask.id}] ${activeTask.title}`);
+  } else if (stack.ready_tasks[0]) {
+    nextSteps.push(`从队列首项 [${stack.ready_tasks[0].id}] ${stack.ready_tasks[0].title} 开始`);
+  } else {
+    nextSteps.push("重新规划下一轮任务并调用 pcp_plan");
+  }
+  if (stack.ready_tasks[0] && activeTask) {
+    nextSteps.push(`完成当前任务后推进 [${stack.ready_tasks[0].id}] ${stack.ready_tasks[0].title}`);
+  } else if (pendingBacklog[0]) {
+    nextSteps.push(`评估 backlog 首项 [${pendingBacklog[0].id}] ${pendingBacklog[0].title}`);
+  }
+
+  return {
+    generated_at: new Date().toISOString(),
+    audience: audience ?? null,
+    focus: focus ?? null,
+    project: {
+      name: projectJson?.name ?? null,
+      summary: projectJson?.summary ?? projectContext ?? null,
+      context: projectContext,
+      status: projectStatus,
+      key_files: projectJson?.key_files ?? [],
+    },
+    main_task: mainTask ? {
+      id: mainTask.id,
+      title: mainTask.title,
+      lifecycle_status: mainCard?.lifecycle_status ?? null,
+      review_status: mainCard?.review_status ?? null,
+      git_status: mainCard?.git_status ?? null,
+      handoff_status: mainCard?.handoff_status ?? null,
+    } : null,
+    active_task: activeTask ? {
+      id: activeTask.id,
+      title: activeTask.title,
+      lifecycle_status: activeCard?.lifecycle_status ?? null,
+      review_status: activeCard?.review_status ?? null,
+      git_status: activeCard?.git_status ?? null,
+      handoff_status: activeCard?.handoff_status ?? null,
+    } : null,
+    queue: stack.ready_tasks.map((task) => ({ id: task.id, title: task.title })),
+    backlog: pendingBacklog,
+    recent_events: recentEvents,
+    recent_worklog: recentWorklog,
+    resume_prompt: parentTask?.resume_prompt ?? activeTask?.resume_prompt ?? null,
+    next_steps: nextSteps,
+  };
+}
+
+export function readHandoffSnapshot(dir: string): HandoffSnapshot | null {
+  const snapshotPath = handoffJsonPath(dir);
+  if (!fs.existsSync(snapshotPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as HandoffSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function markTaskHandoffStatus(dir: string, taskId: string | null, status: TaskCardHandoffStatus, actor: string): void {
+  if (!taskId) return;
+  let card = readTaskCard(dir, taskId);
+  if (!card) {
+    reconcileTaskCards(dir);
+    card = readTaskCard(dir, taskId);
+  }
+  if (!card) return;
+  writeTaskCard(dir, {
+    ...card,
+    handoff_status: status,
+    last_actor: actor,
+  });
+}
+
+export function intakeHandoff(dir: string): IntakeResult {
+  ensureDir(dir);
+  const snapshot = readHandoffSnapshot(dir);
+  if (!snapshot) {
+    throw new Error("No handoff snapshot found");
+  }
+  const stack = readStack(dir);
+  const activeTaskId = stack.active_task_id ?? snapshot.active_task?.id ?? null;
+  markTaskHandoffStatus(dir, activeTaskId, "resumed", "pcp_intake");
+  appendWorklog(
+    dir,
+    `🤝 读取 HANDOFF${snapshot.focus ? `（重点：${snapshot.focus}）` : ""}${activeTaskId ? `，恢复到 ${activeTaskId}` : ""}`,
+  );
+  return {
+    source_path: handoffJsonPath(dir),
+    active_task_id: activeTaskId,
+    queue_count: stack.ready_tasks.length,
+  };
+}
+
+export function writeHandoff(dir: string, options: HandoffOptions = {}): { path: string; snapshot_path: string; markdown: string } {
   ensureDir(dir);
   const markdown = buildHandoffMarkdown(dir, options);
   const handoffPath = path.join(pcpDir(dir), "HANDOFF.md");
+  const snapshotPath = handoffJsonPath(dir);
+  const snapshot = buildHandoffSnapshot(dir, options);
   fs.writeFileSync(handoffPath, markdown);
-  return { path: handoffPath, markdown };
+  fs.writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2));
+  markTaskHandoffStatus(dir, snapshot.active_task?.id ?? null, "prepared", "pcp_handoff");
+  return { path: handoffPath, snapshot_path: snapshotPath, markdown };
 }

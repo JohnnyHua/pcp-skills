@@ -1,10 +1,39 @@
 # PCP Skills for OpenCode
 
-**PCP (Progress Control Plane)** — Task queue and backlog management for AI coding agents.
+> A workflow control layer for AI coding agents. Keep the main task on track, collect side requests safely, and hand work off across tools without losing context.
 
-Solves two problems:
-1. **Lost main thread** — agent wanders off mid-task, forgets what it was doing
-2. **Scope creep** — user adds "oh also do X" mid-sprint, derailing current work
+**PCP (Progress Control Plane)** is a workflow layer for AI coding agents. It helps an AI stay on the current task, collect side requests without losing focus, and hand work off cleanly when you switch tools.
+
+For a normal user, the idea is simple:
+1. You tell the agent what to do.
+2. PCP turns that into a visible task flow.
+3. The agent works through it without quietly changing the plan.
+4. If you switch to another tool, PCP writes a handoff so the next agent can continue.
+
+It mainly solves these problems:
+1. **Lost main thread** — the agent wanders off and forgets the real task
+2. **Scope creep** — "also do X" interrupts the current sprint
+3. **Context loss between tools** — switching from one AI tool to another means re-explaining everything
+
+## Project Outline
+
+PCP is not another coding agent. It is a control layer that sits above AI coding agents and keeps software development on a visible, reviewable workflow.
+
+At a high level, the project has five parts:
+1. **Plan and Task flow** — turn approved work into formal tasks and a queue
+2. **Execution control** — keep the current task on track and stop silent task skipping
+3. **Proposal and approval** — let agents suggest work without silently creating formal tasks
+4. **Context continuity** — use handoff and intake to continue work across AI tools
+5. **Project memory** — keep backlog, concern log, worklog, and changelog as persistent process records
+
+The current implementation already includes:
+- persisted `TaskCard`, `Plan`, `Blueprint`, and `Proposal` objects
+- gated task completion with explicit approval
+- approved-only task and subtask creation
+- machine-readable handoff and intake
+- concern logging for future-stage architecture questions
+
+The long-term goal is to make AI development feel structured instead of improvised: the agent should know what it is doing, why it is doing it, what still needs approval, and how to hand work to the next tool without losing context.
 
 ## Architecture
 

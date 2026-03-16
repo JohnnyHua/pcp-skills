@@ -3,17 +3,36 @@ import { tool } from "@opencode-ai/plugin/tool";
 import path from "node:path";
 
 import {
+  approveTaskProposal,
+  approvePendingCompletion,
   appendEvent,
   appendWorklog,
+  compilePlan,
+  completeActiveTask,
+  createBlueprint,
+  createBlueprintSubtaskProposal,
+  createConcern,
+  createTaskProposal,
   ensureDir,
   getPendingBacklog,
+  intakeHandoff,
   getTask,
+  listConcerns,
+  listBlueprints,
+  listTaskProposals,
+  matchConcerns,
+  requestTaskCompletion,
+  readBlueprint,
   readProjectContext,
   readProjectMd,
   readStack,
+  readTaskCard,
+  rejectTaskProposal,
   replayBacklog,
   replayEvents,
   scanProject,
+  setCompletionMode,
+  shouldSuggestBlueprint,
   writeHandoff,
   writeProjectFiles,
   writeStack,
@@ -42,7 +61,7 @@ function isBashTool(name: string): boolean {
 // ──────────────────────────────────────────────
 
 // PCP behavioral rule — always injected to ALL agents via system.transform
-const PCP_RULE = `[PCP规则] 任务语言：跟随用户沟通语言(用户说中文→中文任务,说English→English tasks); 任务粒度：每个Task=具体可交付物(≤2h,有完成标准),禁止创建项目目标/Sprint容器类大任务; pcp_sub仅用于临时绕行(做完立即返回),禁止用pcp_sub执行队列中的Task; 【完成审查】任务完成时如有产出文件→列出清单问"需要审查吗？"→需要则按类型展示(.md→pandoc转PDF给路径,.json→格式化关键字段,.txt→短文件直接贴/长文件摘要,代码→git diff关键变更)→确认后再pcp_done,不需要则直接pcp_done; "以后/顺便/记一下X"→pcp_capture; 收到todolist/计划→先扫描项目已有代码和产出文件,已完成的工作不建任务→pcp_plan(tasks)加载后展示清单等用户确认再执行; "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
+const PCP_RULE = `[PCP规则] 任务语言：跟随用户沟通语言(用户说中文→中文任务,说English→English tasks); 任务粒度：每个Task=具体可交付物(≤2h,有完成标准),禁止创建项目目标/Sprint容器类大任务; 正式任务必须经用户批准后才能进入队列，agent只能提议不能自行加T任务; pcp_sub仅用于临时绕行(做完立即返回),禁止用pcp_sub执行队列中的Task; 【完成审查】completion mode=gated 时，pcp_done 只提交完成汇报，需用户确认后再 pcp_approve 推进；completion mode=auto 时才允许自动推进; "以后/顺便/记一下X"→pcp_capture; 收到todolist/计划→先扫描项目已有代码和产出文件,已完成的工作不建任务→pcp_plan(tasks)加载后展示清单等用户确认再执行; "本来/原本/改成/发现更好"→确认是否pcp_pivot; 无任务→引导做plan`;
 
 function buildShortContext(
   stack: Stack,
@@ -186,15 +205,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
       console.log(`[PCP] auto-advanced to ${next.id}: ${next.title}`);
       return;
     }
-
-    // No ready tasks → create ad-hoc task
-    const id = `T${String(stack.next_id).padStart(3, "0")}`;
-    appendEvent(dir, { e: "created", id, type: "main", title, ts: Date.now() });
-    stack.active_stack = [id];
-    stack.active_task_id = id;
-    stack.next_id++;
-    writeStack(dir, stack);
-    console.log(`[PCP] auto-started ${id}: ${title}`);
+    console.log(`[PCP] no approved task to auto-start for: ${title}`);
   }
 
   function autoDoneTask(dir: string): void {
@@ -202,23 +213,16 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
     if (!stack.active_task_id) return;
 
     const doneId = stack.active_task_id;
-    appendEvent(dir, { e: "done", id: doneId, ts: Date.now() });
-    stack.active_stack.pop();
-
-    if (stack.active_stack.length > 0) {
-      // Return to parent task (sub-task done)
-      stack.active_task_id = stack.active_stack[stack.active_stack.length - 1];
-    } else if (stack.ready_tasks.length > 0) {
-      // Auto-advance from ready queue
-      const next = stack.ready_tasks.shift()!;
-      stack.active_stack = [next.id];
-      stack.active_task_id = next.id;
-      console.log(`[PCP] auto-advanced to ${next.id}: ${next.title}`);
-    } else {
-      stack.active_task_id = null;
+    if ((stack.completion_mode ?? "gated") === "gated") {
+      requestTaskCompletion(dir, { review: "skip", via: "git_commit" });
+      console.log(`[PCP] completion for ${doneId} is waiting for approval`);
+      return;
     }
-
-    writeStack(dir, stack);
+    const result = completeActiveTask(dir, { review: "skip", via: "git_commit" });
+    if (result.outcome === "advanced" && result.nextTaskId) {
+      const next = getTask(replayEvents(dir), result.nextTaskId);
+      console.log(`[PCP] auto-advanced to ${result.nextTaskId}: ${next?.title ?? result.nextTaskId}`);
+    }
     console.log(`[PCP] auto-done ${doneId} (git commit)`);
   }
 
@@ -356,26 +360,22 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         async execute({ tasks }, context) {
           const dir = context.directory;
           ensureDir(dir);
-          const stack = readStack(dir);
 
           if (tasks.length === 0) return "❌ 任务列表为空";
-
-          const created: { id: string; title: string }[] = [];
-          for (const title of tasks) {
-            const id = `T${String(stack.next_id).padStart(3, "0")}`;
-            appendEvent(dir, { e: "created", id, type: "main", title, ts: Date.now() });
-            created.push({ id, title });
-            stack.next_id++;
-          }
+          const stack = readStack(dir);
+          const { plan, created } = compilePlan(dir, {
+            source: "pcp_plan",
+            title: `Plan ${new Date().toISOString().slice(0, 16)}`,
+            tasks,
+          });
 
           if (stack.active_task_id) {
             // Active task exists → all new tasks append to ready queue
             const activeTasks = replayEvents(dir);
             const activeTask = getTask(activeTasks, stack.active_task_id);
-            stack.ready_tasks = [...stack.ready_tasks, ...created];
-            writeStack(dir, stack);
+            appendWorklog(dir, `📋 Plan ${plan.id} 已追加 ${created.length} 个任务: ${created.map(t => t.id).join(", ")}`);
             return [
-              `📋 ${created.length} 个任务已加入队列（待确认）：`,
+              `📋 Plan ${plan.id} 已加载 ${created.length} 个任务（待确认）：`,
               ...created.map((t) => `  ⏳ ${t.id}: ${t.title}`),
               ``,
               `⚠️  当前主线任务仍在进行：${activeTask?.title ?? stack.active_task_id}`,
@@ -385,15 +385,9 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             ].join("\n");
           }
 
-          // No active task → first = doing, rest = ready
+          appendWorklog(dir, `📋 Plan ${plan.id} 已加载 ${created.length} 个任务: ${created.map(t => t.id).join(", ")}`);
           const [first, ...rest] = created;
-          stack.active_stack = [first.id];
-          stack.active_task_id = first.id;
-          stack.ready_tasks = [...stack.ready_tasks, ...rest];
-          writeStack(dir, stack);
-
-          appendWorklog(dir, `📋 Plan 加载 ${created.length} 个任务: ${created.map(t => t.id).join(", ")}`);
-          const lines = [`📋 Plan 已加载（${created.length} 个任务），待确认：`];
+          const lines = [`📋 Plan ${plan.id} 已加载（${created.length} 个任务），待确认：`];
           lines.push(`  📌 ${first.id}: ${first.title}`);
           for (const t of rest) {
             lines.push(`  ⏳ ${t.id}: ${t.title}`);
@@ -412,7 +406,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
 
       pcp_sub: tool({
         description:
-          "开始一个子任务（压栈到当前任务之上）。git commit 后自动弹回主线。",
+          "提出一个临时子任务提议。用户批准后，子任务才会真正压栈到当前主任务之上。",
         args: {
           title: tool.schema.string().describe("子任务标题"),
         },
@@ -426,26 +420,23 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           }
 
           const parentId = stack.active_task_id;
-          const id = `T${String(stack.next_id).padStart(3, "0")}`;
-
           const tasks = replayEvents(dir);
           const parentTitle = getTask(tasks, parentId)?.title ?? parentId;
-          const resumePrompt = `准备进入子任务【${title}】，完成后继续主任务：${parentTitle}。`;
-
-          appendEvent(dir, {
-            e: "resume_set",
-            id: parentId,
-            prompt: resumePrompt,
-            ts: Date.now(),
+          const proposal = createTaskProposal(dir, {
+            title,
+            detail: `这是主任务【${parentTitle}】的临时子任务提议。`,
+            kind: "subtask",
+            parent_task_id: parentId,
           });
-          appendEvent(dir, { e: "sub", id, parent: parentId, title, ts: Date.now() });
+          appendWorklog(dir, `💡 [${proposal.id}] 提议子任务: ${proposal.title}`);
 
-          stack.active_stack.push(id);
-          stack.active_task_id = id;
-          stack.next_id++;
-          writeStack(dir, stack);
-
-          return `✅ 子任务 [${id}] 已开始：${title}\n\ngit commit 后自动返回主线`;
+          return [
+            `💡 已记录子任务提议：${proposal.id}`,
+            `主任务: ${parentTitle} [${parentId}]`,
+            `标题: ${title}`,
+            ``,
+            `如果确认进入这个子任务，调用 pcp_approve_task_proposal({ proposal_id: "${proposal.id}" })。`,
+          ].join("\n");
         },
       }),
 
@@ -453,8 +444,13 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         description:
           "手动完成当前任务（git commit 会自动触发，仅在需要手动完成时使用）。" +
           "如果队列中有下一个任务会自动推进，全部完成时提示做新 plan。",
-        args: {},
-        async execute(_args, context) {
+        args: {
+          review: tool.schema
+            .string()
+            .optional()
+            .describe("可选：review 方式，`yes`=人工检查通过，`no`=机器检查通过，`skip`=跳过检查。默认 skip"),
+        },
+        async execute({ review = "skip" }, context) {
           const dir = context.directory;
           ensureDir(dir);
           const stack = readStack(dir);
@@ -464,35 +460,40 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           const doneId = stack.active_task_id;
           const tasks = replayEvents(dir);
           const doneTask = getTask(tasks, doneId);
-          appendEvent(dir, { e: "done", id: doneId, ts: Date.now() });
           appendWorklog(dir, `✅ [${doneId}] ${doneTask?.title ?? doneId}`);
-          stack.active_stack.pop();
+          const decision = review === "yes" || review === "no" || review === "skip" ? review : "skip";
+          if ((stack.completion_mode ?? "gated") === "gated") {
+            requestTaskCompletion(dir, { review: decision, via: "manual" });
+            return [
+              `🛑 [${doneId}] ${doneTask?.title ?? doneId} 已提交完成汇报，当前不会自动推进。`,
+              `review: ${decision}，等待人工确认。`,
+              "",
+              `如果确认继续，调用 pcp_approve。`,
+              `如果要返工，就继续改当前任务，不要批准。`,
+            ].join("\n");
+          }
+          const result = completeActiveTask(dir, { review: decision, via: "manual" });
 
           // Case 1: sub-task done → return to parent
-          if (stack.active_stack.length > 0) {
-            const parentId = stack.active_stack[stack.active_stack.length - 1];
-            stack.active_task_id = parentId;
-            writeStack(dir, stack);
-
+          if (result.outcome === "returned_to_parent" && result.parentId) {
+            const parentId = result.parentId;
             const parentTask = getTask(tasks, parentId);
             if (parentTask) {
-              return `子任务【${doneTask?.title ?? doneId}】已完成。\n继续主任务：${parentTask.title}。`;
+              return `子任务【${doneTask?.title ?? doneId}】已完成。\nreview: ${decision}，git: pending。\n继续主任务：${parentTask.title}。`;
             }
             return `✅ [${doneId}] 已完成，返回 [${parentId}]`;
           }
 
           // Case 2: main task done → try auto-advance from ready queue
-          if (stack.ready_tasks.length > 0) {
-            const next = stack.ready_tasks.shift()!;
-            stack.active_stack = [next.id];
-            stack.active_task_id = next.id;
-            writeStack(dir, stack);
-
-            const remaining = stack.ready_tasks.length;
+          if (result.outcome === "advanced" && result.nextTaskId) {
+            const refreshed = readStack(dir);
+            const next = getTask(replayEvents(dir), result.nextTaskId);
+            const remaining = refreshed.ready_tasks.length;
             const lines = [
               `✅ [${doneId}] ${doneTask?.title ?? ""} 完成！`,
+              `   review: ${decision}，git: pending`,
               ``,
-              `⏭️ 自动推进 → [${next.id}] ${next.title}`,
+              `⏭️ 自动推进 → [${result.nextTaskId}] ${next?.title ?? result.nextTaskId}`,
             ];
             if (remaining > 0) {
               lines.push(`   (还有 ${remaining} 个任务排队)`);
@@ -503,11 +504,8 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           }
 
           // Case 3: all tasks done
-          stack.active_task_id = null;
-          writeStack(dir, stack);
-
           const pending = getPendingBacklog(dir);
-          const lines = [`🎉 所有计划任务已完成！`];
+          const lines = [`🎉 所有计划任务已完成！`, `review: ${decision}，git: pending`];
           if (pending.length > 0) {
             lines.push(
               ``,
@@ -517,6 +515,60 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           }
           lines.push(``, `💡 建议：让 planner 规划下一轮任务，然后 pcp_plan 加载。`);
           return lines.join("\n");
+        },
+      }),
+
+      pcp_approve: tool({
+        description:
+          "批准当前待确认完成的任务，并按既定队列推进到下一任务。" +
+          "仅在 completion mode = gated 时有意义。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+          const pending = stack.pending_completion;
+          if (!pending || !stack.active_task_id || pending.task_id !== stack.active_task_id) {
+            return "❌ 当前没有待批准完成的任务。";
+          }
+
+          const tasks = replayEvents(dir);
+          const task = getTask(tasks, pending.task_id);
+          const result = approvePendingCompletion(dir);
+
+          if (result.outcome === "advanced" && result.nextTaskId) {
+            const next = getTask(replayEvents(dir), result.nextTaskId);
+            return [
+              `✅ 已批准 [${pending.task_id}] ${task?.title ?? pending.task_id} 完成。`,
+              `⏭️ 自动推进 → [${result.nextTaskId}] ${next?.title ?? result.nextTaskId}`,
+            ].join("\n");
+          }
+
+          if (result.outcome === "returned_to_parent" && result.parentId) {
+            const parentTask = getTask(replayEvents(dir), result.parentId);
+            return `✅ 已批准子任务完成，返回主任务：${parentTask?.title ?? result.parentId}`;
+          }
+
+          return `✅ 已批准 [${pending.task_id}] ${task?.title ?? pending.task_id} 完成。当前没有后续任务。`;
+        },
+      }),
+
+      pcp_set_completion_mode: tool({
+        description:
+          "设置任务完成后的推进模式：gated=先汇报等批准，auto=完成后自动推进。",
+        args: {
+          mode: tool.schema
+            .string()
+            .describe("可选值：`gated` 或 `auto`"),
+        },
+        async execute({ mode }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const normalized = mode === "auto" ? "auto" : "gated";
+          setCompletionMode(dir, normalized);
+          return normalized === "gated"
+            ? "✅ completion mode 已切换为 gated：任务完成后先停下汇报，等待 pcp_approve。"
+            : "✅ completion mode 已切换为 auto：任务完成后会自动推进到下一个已批准任务。";
         },
       }),
 
@@ -598,6 +650,26 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           const lines: string[] = [];
 
           if (projectCtx) lines.push(`[项目] ${projectCtx}`);
+          lines.push(`[completion mode] ${stack.completion_mode ?? "gated"}`);
+          if (stack.pending_completion) {
+            lines.push(`[待批准完成] ${stack.pending_completion.task_id}`);
+          }
+          const proposals = listTaskProposals(dir);
+          const pendingProposals = proposals.filter((item) => item.status === "proposed");
+          if (pendingProposals.length > 0) {
+            const subtaskCount = pendingProposals.filter((item) => item.kind === "subtask").length;
+            lines.push(
+              `[待批准提议] ${pendingProposals.length} 个${subtaskCount > 0 ? `（子任务 ${subtaskCount} 个）` : ""}`,
+            );
+          }
+          if (stack.active_task_id) {
+            const activeCard = readTaskCard(dir, stack.active_task_id);
+            if (activeCard?.current_blueprint_id) {
+              lines.push(`[当前蓝图] ${activeCard.current_blueprint_id}`);
+            } else if (shouldSuggestBlueprint(activeCard ?? null, pendingProposals)) {
+              lines.push(`[蓝图建议] 当前任务较复杂，建议先创建 Blueprint。`);
+            }
+          }
 
           if (!stack.active_task_id) {
             lines.push("当前没有进行中的任务。");
@@ -644,6 +716,187 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         },
       }),
 
+      pcp_blueprint_create: tool({
+        description:
+          "为当前 doing 任务创建一个执行蓝图。蓝图只展开当前任务的实现步骤，不会自动创建子任务或 backlog。",
+        args: {
+          title: tool.schema.string().describe("蓝图标题"),
+          steps: tool.schema
+            .array(tool.schema.string())
+            .describe("有序步骤列表，如 ['先做骨架', '再补基础字段', '最后补状态展示']"),
+        },
+        async execute({ title, steps }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          if (steps.length === 0) return "❌ Blueprint steps 不能为空。";
+
+          const blueprint = createBlueprint(dir, { title, steps });
+          appendWorklog(dir, `🧩 [${blueprint.task_id}] 绑定蓝图 ${blueprint.id}: ${blueprint.title}`);
+          return [
+            `🧩 已创建当前蓝图：${blueprint.id}`,
+            `任务: ${blueprint.task_id}`,
+            `标题: ${blueprint.title}`,
+            `步骤:`,
+            ...blueprint.steps.map((step, index) => `  ${index + 1}. ${step}`),
+          ].join("\n");
+        },
+      }),
+
+      pcp_blueprint_show: tool({
+        description:
+          "查看当前任务绑定的蓝图；如果当前任务没有蓝图，则返回最近的蓝图列表。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+
+          if (stack.active_task_id) {
+            const activeCard = readTaskCard(dir, stack.active_task_id);
+            if (activeCard?.current_blueprint_id) {
+              const blueprint = readBlueprint(dir, activeCard.current_blueprint_id);
+              if (blueprint) {
+                return [
+                  `🧩 当前蓝图：${blueprint.id}`,
+                  `任务: ${blueprint.task_id}`,
+                  `标题: ${blueprint.title}`,
+                  `状态: ${blueprint.status}`,
+                  `步骤:`,
+                  ...blueprint.steps.map((step, index) => `  ${index + 1}. ${step}`),
+                ].join("\n");
+              }
+            }
+          }
+
+          const blueprints = listBlueprints(dir);
+          if (blueprints.length === 0) {
+            return "🧩 当前没有 Blueprint。";
+          }
+
+          return [
+            `🧩 Blueprint 列表（${blueprints.length} 个）：`,
+            ...blueprints.map((item) => `  ${item.id} [${item.status}] ${item.task_id}: ${item.title}`),
+          ].join("\n");
+        },
+      }),
+
+      pcp_blueprint_propose_subtask: tool({
+        description:
+          "从当前 Blueprint 的某一步手动生成一个子任务提议。它不会直接创建正式子任务，仍需用户批准。",
+        args: {
+          step_index: tool.schema.number().describe("Blueprint 步骤序号，从 1 开始"),
+          detail: tool.schema
+            .string()
+            .optional()
+            .describe("可选：补充提议说明；不填则自动使用蓝图步骤描述"),
+        },
+        async execute({ step_index, detail }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const proposal = createBlueprintSubtaskProposal(dir, { step_index, detail });
+          appendWorklog(
+            dir,
+            `💡 [${proposal.id}] 从蓝图 ${proposal.source_blueprint_id} 第 ${proposal.source_step_index} 步提议子任务: ${proposal.title}`,
+          );
+          return [
+            `💡 已从当前 Blueprint 第 ${proposal.source_step_index} 步生成子任务提议：${proposal.id}`,
+            `标题: ${proposal.title}`,
+            `父任务: ${proposal.parent_task_id}`,
+            `来源蓝图: ${proposal.source_blueprint_id}`,
+            `说明: ${proposal.detail}`,
+            "",
+            `这不是正式子任务。若要进入执行，请调用 pcp_approve_task_proposal({ proposal_id: "${proposal.id}" })。`,
+          ].join("\n");
+        },
+      }),
+
+      pcp_propose_task: tool({
+        description:
+          "提出一个后续任务候选项。它不会直接进入正式队列，必须经用户批准后才能变成 T 任务。",
+        args: {
+          title: tool.schema.string().describe("候选任务标题"),
+          detail: tool.schema.string().describe("提议原因或说明"),
+        },
+        async execute({ title, detail }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const proposal = createTaskProposal(dir, { title, detail });
+          appendWorklog(dir, `💡 [${proposal.id}] 提议任务: ${proposal.title}`);
+          return [
+            `💡 已记录任务提议：${proposal.id}`,
+            `标题: ${proposal.title}`,
+            `说明: ${proposal.detail}`,
+            "",
+            `这不是正式任务。若要加入队列，请调用 pcp_approve_task_proposal。`,
+          ].join("\n");
+        },
+      }),
+
+      pcp_list_task_proposals: tool({
+        description: "查看当前所有待处理的任务提议。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          const proposals = listTaskProposals(dir);
+          if (proposals.length === 0) {
+            return "💡 当前没有任务提议。";
+          }
+          const pending = proposals.filter((item) => item.status === "proposed");
+          return [
+            `💡 任务提议（${proposals.length} 条）：`,
+            ...(pending.length > 0 ? [`待批准：${pending.length} 条`] : []),
+            ...proposals.map((item) => {
+              const kind = item.kind === "subtask" ? "subtask" : "task";
+              const parent = item.parent_task_id ? ` -> ${item.parent_task_id}` : "";
+              const source =
+                item.source_blueprint_id && item.source_step_index
+                  ? ` [${item.source_blueprint_id}#${item.source_step_index}]`
+                  : "";
+              return `  ${item.id} [${item.status}] [${kind}] ${item.title}${parent}${source}`;
+            }),
+          ].join("\n");
+        },
+      }),
+
+      pcp_approve_task_proposal: tool({
+        description:
+          "批准一个任务提议，让它变成正式任务并进入当前队列。",
+        args: {
+          proposal_id: tool.schema.string().describe("任务提议 ID，如 TP001"),
+        },
+        async execute({ proposal_id }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const result = approveTaskProposal(dir, proposal_id);
+          const stack = readStack(dir);
+          appendWorklog(dir, `✅ [${proposal_id}] 批准提议并入队: ${result.task_id}`);
+          if (stack.active_task_id === result.task_id) {
+            return `✅ 已批准 ${proposal_id}，正式任务 ${result.task_id} 已开始执行。`;
+          }
+          return `✅ 已批准 ${proposal_id}，正式任务 ${result.task_id} 已加入队列。`;
+        },
+      }),
+
+      pcp_reject_task_proposal: tool({
+        description:
+          "拒绝一个任务提议。它会保留记录，但不会生成正式任务。",
+        args: {
+          proposal_id: tool.schema.string().describe("任务提议 ID，如 TP001"),
+        },
+        async execute({ proposal_id }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const proposals = listTaskProposals(dir);
+          const proposal = proposals.find((item) => item.id === proposal_id);
+          if (!proposal) {
+            return `❌ 找不到任务提议：${proposal_id}`;
+          }
+          rejectTaskProposal(dir, proposal_id);
+          appendWorklog(dir, `🗑️ [${proposal_id}] 拒绝提议: ${proposal.title}`);
+          return `🗑️ 已拒绝 ${proposal_id}：${proposal.title}`;
+        },
+      }),
+
       pcp_handoff: tool({
         description:
           "按需生成交接文档 HANDOFF.md，供 ChatGPT、Claude Code、OpenCode 等无共享记忆的 AI 工具接力使用。" +
@@ -664,7 +917,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         },
         async execute({ audience, focus, include_backlog = true }, context) {
           const dir = context.directory;
-          const { path: handoffPath, markdown } = writeHandoff(dir, {
+          const { path: handoffPath, snapshot_path: snapshotPath, markdown } = writeHandoff(dir, {
             audience,
             focus,
             include_backlog,
@@ -682,6 +935,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
 
           return [
             `🤝 已生成交接文档：${handoffPath}`,
+            `🧠 PCP 语义文件：${snapshotPath}`,
             "",
             "用途：把当前 PCP 状态压缩成可直接交给下一个 AI 的上下文。",
             "内容：当前任务、进展、未完成项、backlog、最近事件、下一步建议。",
@@ -689,6 +943,109 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             "预览：",
             preview,
           ].join("\n");
+        },
+      }),
+
+      pcp_intake: tool({
+        description:
+          "读取当前 PCP handoff 语义文件，恢复最小接手上下文，并记录一次 intake。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          const result = intakeHandoff(dir);
+          const stack = readStack(dir);
+          const tasks = replayEvents(dir);
+          const activeTask = result.active_task_id ? getTask(tasks, result.active_task_id) : null;
+
+          const lines = [
+            `🤝 已读取 handoff：${result.source_path}`,
+            "",
+          ];
+          if (activeTask) {
+            lines.push(`📌 当前恢复任务： [${activeTask.id}] ${activeTask.title}`);
+          } else {
+            lines.push("📌 当前恢复任务：无");
+          }
+          lines.push(`⏳ 当前队列数：${result.queue_count}`);
+          if (!stack.active_task_id && stack.ready_tasks.length === 0) {
+            lines.push("💡 当前没有活动任务，建议重新规划。");
+          }
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_concern_capture: tool({
+        description:
+          "记录一个 Concern 条目，表示未来某个阶段需要重新讨论的问题。" +
+          "用于架构边界、兼容性风险、阶段性提醒，不用于普通待办功能。",
+        args: {
+          title: tool.schema.string().describe("Concern 标题"),
+          detail: tool.schema.string().describe("Concern 说明，写清楚为什么以后要重新讨论"),
+          tags: tool.schema
+            .array(tool.schema.string())
+            .describe("Concern 标签，如 ['phase:hook', 'user-intent', 'language:zh']"),
+        },
+        async execute({ title, detail, tags }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const concern = createConcern(dir, { title, detail, tags });
+          appendWorklog(dir, `⚠️ [${concern.id}] Concern: ${concern.title}`);
+          return [
+            `⚠️ 已记录 Concern： [${concern.id}] ${concern.title}`,
+            `tags: ${concern.tags.join(", ")}`,
+            ``,
+            concern.detail,
+          ].join("\n");
+        },
+      }),
+
+      pcp_concern_list: tool({
+        description: "列出当前所有 Concern 条目，供后续阶段回顾。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          const concerns = listConcerns(dir);
+
+          if (concerns.length === 0) {
+            return "🧭 当前没有 Concern 条目。";
+          }
+
+          const lines = [`🧭 Concern Log（${concerns.length} 条）：`];
+          for (const concern of concerns) {
+            lines.push(`  ${concern.id}: ${concern.title}`);
+            lines.push(`     tags: ${concern.tags.join(", ")}`);
+          }
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_concern_match: tool({
+        description:
+          "按 tags 匹配 Concern，查看当前阶段/产物/宿主相关的未来提醒事项。",
+        args: {
+          tags: tool.schema
+            .array(tool.schema.string())
+            .describe("当前上下文 tags，如 ['artifact:handoff', 'phase:hook']"),
+        },
+        async execute({ tags }, context) {
+          const dir = context.directory;
+          const matches = matchConcerns(dir, tags);
+
+          if (matches.length === 0) {
+            return `🧭 当前没有匹配 tags 的 Concern。\nquery: ${tags.join(", ")}`;
+          }
+
+          const lines = [
+            `🧭 命中 ${matches.length} 条 Concern：`,
+            `query: ${tags.join(", ")}`,
+          ];
+          for (const item of matches) {
+            lines.push(``);
+            lines.push(`  ${item.concern.id}: ${item.concern.title}`);
+            lines.push(`     matched: ${item.matched_tags.join(", ")}`);
+            lines.push(`     detail: ${item.concern.detail}`);
+          }
+          return lines.join("\n");
         },
       }),
 

@@ -1,8 +1,8 @@
 {
   "current_sprint": null,
-  "last_completed_sprint": "SPRINT-2026-03-10-STRUCTURE",
-  "pending_sprint": null,
-  "pending_goal": null,
-  "last_run_at": "2026-03-10T14:50:00+01:00",
-  "notes": "Created feature/repo-structure-cleanup and reorganized documentation layout by removing the duplicate Chinese README and moving PCP architecture docs under docs/architecture."
+  "last_completed_sprint": "SPRINT-2026-03-16-BLUEPRINT-SUBTASK-BRIDGE",
+  "pending_sprint": "SPRINT-2026-03-16-README-TOOL-SYNC",
+  "pending_goal": "Sync README tool descriptions with the current approval-first PCP runtime, especially pcp_done, pcp_sub, proposal flow, and Blueprint guidance.",
+  "last_run_at": "2026-03-16T16:18:00+01:00",
+  "notes": "Blueprint remains optional and only recommended for complex doing tasks. The runtime now supports a manual bridge from Blueprint steps to approval-gated subtask proposals, with source metadata visible during review. Next, the public docs should catch up with the current tool semantics."
 }

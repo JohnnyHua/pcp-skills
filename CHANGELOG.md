@@ -13,3 +13,51 @@
 - Added `docs/architecture/pcp-runtime-implementation-roadmap.md` to sequence the implementation phases and record new Concern Log items for self-loop planning and a future standalone test/review layer.
 - Added a naming rationale in `docs/architecture/pcp-positioning.md` explaining why PCP stands for `Progress Control Plane`.
 - Cleaned up repository structure by removing duplicate `README-zh.md`, ignoring `.DS_Store`, and grouping PCP architecture docs under `docs/architecture/`.
+- Added minimal persisted `TaskCard` support in `plugin/state.ts`, including task card JSON storage, an index file, and reconciliation from legacy PCP events plus current queue state.
+- Added `tests/taskcards.test.ts` to verify TaskCard reconciliation for active, queued, completed, and parent-child task scenarios.
+- Refined PCP governance docs so `Open risks` remain sprint-level summaries, follow-up items are moved into backlog during sprint review, and Concern Log entries use tags to re-surface future architecture questions.
+- Added review guidance that treats `Delivery Bundle` as a standard review artifact and separates engineering verification from result-level verification.
+- Added Chinese-friendly review guidance for `Delivery Bundle`, including adaptive wording and a requirement to show actual generated results when the sprint produces a concrete artifact.
+- Added persisted `PlanRecord` support in `plugin/state.ts`, including `.opencode/pcp/plans/*.json`, a plans index, and `compilePlan` to normalize plan outputs into stored plan metadata plus queue state.
+- Updated `pcp_plan` to route through the new plan compilation path instead of manually creating queue entries inline.
+- Added `tests/plan-compilation.test.ts` to cover persisted plan metadata, queue loading, and plan-linked TaskCard creation.
+- Added [docs/plans/2026-03-10-plan-compilation-runtime.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-10-plan-compilation-runtime.md) as the execution plan for Phase 2.
+- Added a shared completion helper in `plugin/state.ts` so PCP now persists real `lifecycle_status`, `review_status`, and `git_status` transitions when tasks are completed manually or through the git-commit hook.
+- Updated `pcp_done` to accept an optional review choice and record review/git runtime state while preserving queue auto-advance.
+- Added `tests/lifecycle-review.test.ts` to verify manual completion, git-commit completion, subtask return, and queue advancement behavior.
+- Added [docs/plans/2026-03-11-lifecycle-review-gate.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-11-lifecycle-review-gate.md) as the implementation plan for the lifecycle/review sprint.
+- Recorded the future “professional / Chinese-friendly Delivery Bundle dual template” as a backlog item in the roadmap rather than expanding the current sprint.
+- Added a semantic handoff sidecar at `.opencode/pcp/HANDOFF.json` so handoff now includes machine-readable PCP context alongside `HANDOFF.md`.
+- Added `intakeHandoff()` in `plugin/state.ts` and exposed `pcp_intake` in the plugin to restore the minimal handoff context and mark the resumed task.
+- Updated handoff runtime status so the active task is marked `prepared` when handoff is generated and `resumed` when intake occurs.
+- Added `tests/intake.test.ts` to verify sidecar output, intake restore behavior, and worklog recording.
+- Added [docs/plans/2026-03-11-handoff-intake-skeleton.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-11-handoff-intake-skeleton.md) as the implementation plan for the handoff/intake skeleton sprint.
+- Enhanced `HANDOFF.json` so it now carries stronger project-summary semantics, including project context/status, task runtime states, recent worklog entries, and resume prompts.
+- Recorded future handoff semantics for `branch / commit / pcp version / completed summary` in the Concern Log instead of expanding the current sprint into conflict-resolution work.
+- Added persisted `ConcernRecord` support in `plugin/state.ts`, including `.opencode/pcp/concerns/*.json`, a concerns index, and partial tag-overlap matching sorted by relevance.
+- Exposed `pcp_concern_capture`, `pcp_concern_list`, and `pcp_concern_match` so PCP can record future-stage concerns as runtime objects instead of only architecture notes.
+- Added `tests/concern-log.test.ts` to verify concern persistence, indexing, and partial tag matching behavior.
+- Added [docs/plans/2026-03-11-concern-log-mechanism.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-11-concern-log-mechanism.md) as the implementation plan for the minimal Concern Log sprint.
+- Added `completion_mode` runtime state with `gated` and `auto`, plus persisted pending-completion tracking so tasks can stop for human approval before queue advancement.
+- Updated `pcp_done` and git-commit auto-completion so `gated` mode no longer auto-advances; added `pcp_approve` and `pcp_set_completion_mode` to control approval and execution tempo explicitly.
+- Disabled PCP runtime auto-start of ad-hoc main tasks when no approved task is active, preventing unapproved ghost tasks from being created by runtime hooks.
+- Added `tests/completion-mode.test.ts` and expanded lifecycle coverage to verify gated approval flow while preserving `auto` compatibility.
+- Added [docs/plans/2026-03-16-completion-gate-and-task-approval.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-completion-gate-and-task-approval.md) as the implementation plan for completion gating and task approval.
+- Added persisted `BlueprintRecord` support in `plugin/state.ts`, including `.opencode/pcp/blueprints/*.json`, a blueprints index, archive-on-rebind behavior, and `current_blueprint_id` on `TaskCard`.
+- Exposed `pcp_blueprint_create` and `pcp_blueprint_show` so the active doing-task can carry a concrete execution blueprint without generating sub-tasks automatically.
+- Added `tests/blueprint.test.ts` to verify blueprint persistence, task binding, and rebind/archive behavior.
+- Added [docs/plans/2026-03-16-blueprint-skeleton.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-blueprint-skeleton.md) as the implementation plan for the minimal Blueprint sprint.
+- Added persisted `TaskProposalRecord` support in `plugin/state.ts`, including `.opencode/pcp/proposals/*.json`, a proposals index, and approval/rejection helpers that keep proposals separate from formal tasks.
+- Exposed `pcp_propose_task`, `pcp_list_task_proposals`, `pcp_approve_task_proposal`, and `pcp_reject_task_proposal` so agent-suggested follow-up work requires explicit approval before entering the queue.
+- Added `tests/task-proposal.test.ts` to verify proposal persistence, approval-to-task conversion, and rejection behavior without queue side effects.
+- Added [docs/plans/2026-03-16-task-proposal-flow.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-task-proposal-flow.md) as the implementation plan for the task proposal sprint.
+- Updated `pcp_sub` so it now creates a `subtask` proposal instead of immediately pushing a stacked child task.
+- Extended proposal approval so approved `subtask` proposals become real stacked sub-tasks with parent linkage and resume behavior.
+- Added [docs/plans/2026-03-16-pcp-sub-approval.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-pcp-sub-approval.md) as the implementation plan for subtask approval.
+- Improved proposal review UX so `pcp_status` now surfaces pending proposal counts, including how many are subtask proposals.
+- Updated `pcp_list_task_proposals` to prioritize pending items first and show proposal type plus parent task linkage for subtask proposals.
+- Added [docs/plans/2026-03-16-proposal-review-ux.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-proposal-review-ux.md) as the implementation plan for proposal review UX.
+- Added manual Blueprint-to-subtask bridging so a chosen Blueprint step can become a `subtask` proposal while preserving explicit approval before any real stacked task is created.
+- Extended proposal records and review output with Blueprint source metadata (`source_blueprint_id`, `source_step_index`) for traced subtask suggestions.
+- Updated `pcp_status` to suggest creating a Blueprint only when the current doing task appears complex and still has no active Blueprint.
+- Added [docs/plans/2026-03-16-blueprint-subtask-bridge.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-blueprint-subtask-bridge.md) as the implementation plan for Blueprint-to-subtask bridging.
