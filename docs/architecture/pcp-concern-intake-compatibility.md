@@ -293,6 +293,7 @@ PCP 不需要抢这些名字。无论用户通过：
 7. 是否补一个更独立的测试/审核环节，而不只是当前 review gate
 8. 是否为 hook / runtime 增加调试日志与解释层，记录“收到什么语句、触发了什么动作、为什么这样执行”，让 AI 像 `print debugging` 一样把流程解释给用户看
 9. Handoff 后续是否应加入 `branch / commit / pcp version / completed summary` 等仓库与完成状态语义，用于 intake 时做更可靠的覆盖判断和冲突识别
+10. Blueprint 当前对日常使用是否过于冗长，后续是否应进一步压缩触发条件、提示方式或表达形式，避免复杂任务辅助机制反过来增加使用负担
 
 ## 七、下一步建议
 

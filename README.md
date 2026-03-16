@@ -76,10 +76,12 @@ Then load the `pcp-setup` skill in OpenCode to complete installation:
 ```
 User provides todolist/plan
   → Agent parses and calls pcp_plan(tasks)
+  → approved tasks become formal TaskCards + queue
   → T001 = doing, T002..T005 = queued
-  → Work on T001, git commit → auto-advance to T002
-  → ...
-  → All tasks done → PCP prompts: "Let planner create next plan"
+  → Work on T001
+  → pcp_done submits completion for approval
+  → user decides whether to pcp_approve and continue
+  → current round ends, then planner creates the next plan
 ```
 
 ### Mid-sprint captures
@@ -114,18 +116,31 @@ Agent: calls pcp_handoff(audience="Claude Code", focus="continue current task")
 | Tool | Description |
 |------|-------------|
 | `pcp_init` | Scan project, establish baseline context (run once) |
-| `pcp_plan` | Load a task list — first = doing, rest = queued |
+| `pcp_plan` | Compile an approved task list into formal TaskCards and queue state |
 | `pcp_start` | Start a sprint manually with custom title |
-| `pcp_sub` | Push a subtask onto the stack |
-| `pcp_done` | Close current task (auto-advances to next in queue) |
+| `pcp_sub` | Propose a temporary subtask; it still requires approval before becoming a real stacked subtask |
+| `pcp_done` | Submit the current task as completed; in `gated` mode it waits for approval before advancing |
+| `pcp_approve` | Approve a pending completion and advance the task flow |
+| `pcp_set_completion_mode` | Switch between `gated` and `auto` completion behavior |
 | `pcp_pivot` | Abandon current task with reason, start new direction |
-| `pcp_status` | Show current task, queue, and backlog |
-| `pcp_handoff` | Generate `.opencode/pcp/HANDOFF.md` for another AI tool or operator |
+| `pcp_status` | Show current task, queue, backlog, pending approvals, and Blueprint hint/state |
+| `pcp_handoff` | Generate `.opencode/pcp/HANDOFF.md` and `HANDOFF.json` for another AI tool or operator |
+| `pcp_intake` | Resume a machine-readable handoff snapshot in a PCP-aware environment |
+| `pcp_blueprint_create` | Create a Blueprint for the current complex doing task |
+| `pcp_blueprint_show` | Show the active Blueprint or list recent Blueprints |
+| `pcp_blueprint_propose_subtask` | Turn a chosen Blueprint step into an approval-gated subtask proposal |
+| `pcp_propose_task` | Record a proposed follow-up task without turning it into a formal T-task |
+| `pcp_list_task_proposals` | Review pending and historical task/subtask proposals |
+| `pcp_approve_task_proposal` | Turn an approved proposal into a formal queued task or stacked subtask |
+| `pcp_reject_task_proposal` | Reject a proposal without affecting the formal queue |
 | `pcp_capture` | Add item to backlog (do not execute now) |
 | `pcp_backlog` | List all pending backlog items |
 | `pcp_promote` | Promote backlog item to current sprint subtask |
 | `pcp_dismiss` | Permanently dismiss a backlog item |
 | `pcp_history` | Full history: all sprints + queue + backlog |
+| `pcp_concern_capture` | Record a future-stage concern that should be revisited later |
+| `pcp_concern_list` | List saved concerns |
+| `pcp_concern_match` | Match concerns by tags for a specific host/phase/artifact |
 
 ## Requirements
 

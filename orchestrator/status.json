@@ -1,8 +1,8 @@
 {
   "current_sprint": null,
-  "last_completed_sprint": "SPRINT-2026-03-16-BLUEPRINT-SUBTASK-BRIDGE",
-  "pending_sprint": "SPRINT-2026-03-16-README-TOOL-SYNC",
-  "pending_goal": "Sync README tool descriptions with the current approval-first PCP runtime, especially pcp_done, pcp_sub, proposal flow, and Blueprint guidance.",
-  "last_run_at": "2026-03-16T16:18:00+01:00",
-  "notes": "Blueprint remains optional and only recommended for complex doing tasks. The runtime now supports a manual bridge from Blueprint steps to approval-gated subtask proposals, with source metadata visible during review. Next, the public docs should catch up with the current tool semantics."
+  "last_completed_sprint": "SPRINT-2026-03-16-STATUS-ACTION-HINTS",
+  "pending_sprint": "SPRINT-2026-03-16-USAGE-QUICKSTART",
+  "pending_goal": "Add a very short user-facing PCP quickstart so day-to-day usage is easier to remember than the full README reference.",
+  "last_run_at": "2026-03-16T16:48:00+01:00",
+  "notes": "pcp_status now acts more like an operator panel: it still shows raw state, but it also points to the most likely next command for approvals, proposal review, optional Blueprint use, backlog review, or replanning."
 }

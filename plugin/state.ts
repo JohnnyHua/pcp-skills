@@ -303,6 +303,12 @@ export interface TaskCardIndex {
   updated_at: string;
 }
 
+export interface StatusActionHint {
+  title: string;
+  command: string;
+  reason: string;
+}
+
 export function pcpDir(dir: string): string {
   return path.join(dir, ".opencode", "pcp");
 }
@@ -1048,6 +1054,85 @@ export function shouldSuggestBlueprint(
   if (pendingProposals.some((item) => item.parent_task_id === activeCard.id)) return true;
 
   return false;
+}
+
+export function buildStatusActionHints(input: {
+  stack: Stack;
+  activeCard: TaskCard | null;
+  pendingProposals: TaskProposalRecord[];
+  pendingBacklogCount: number;
+}): StatusActionHint[] {
+  const hints: StatusActionHint[] = [];
+  const { stack, activeCard, pendingProposals, pendingBacklogCount } = input;
+
+  if (stack.pending_completion) {
+    hints.push({
+      title: "先处理当前任务完成审批",
+      command: "pcp_approve",
+      reason: `任务 ${stack.pending_completion.task_id} 已提交完成汇报，当前应先决定是否继续推进。`,
+    });
+    return hints;
+  }
+
+  if (pendingProposals.length > 0) {
+    hints.push({
+      title: "先 review 待批准提议",
+      command: "pcp_list_task_proposals",
+      reason: `当前有 ${pendingProposals.length} 个待批准 proposal，先看清楚再决定是否入队。`,
+    });
+  }
+
+  if (!stack.active_task_id) {
+    if (stack.ready_tasks.length > 0) {
+      hints.push({
+        title: "继续当前队列",
+        command: "pcp_status",
+        reason: `当前没有 active task，但队列里还有 ${stack.ready_tasks.length} 个正式任务待执行。`,
+      });
+    } else {
+      hints.push({
+        title: "先规划下一轮任务",
+        command: "pcp_plan",
+        reason: "当前没有 active task，也没有已装载队列，下一步应该先做 plan。",
+      });
+    }
+
+    if (pendingBacklogCount > 0) {
+      hints.push({
+        title: "顺手回顾 backlog",
+        command: "pcp_backlog",
+        reason: `Backlog 里还有 ${pendingBacklogCount} 项待回顾。`,
+      });
+    }
+
+    return hints;
+  }
+
+  if (shouldSuggestBlueprint(activeCard, pendingProposals)) {
+    hints.push({
+      title: "当前任务较复杂，考虑先建 Blueprint",
+      command: "pcp_blueprint_create",
+      reason: `任务 ${activeCard?.id ?? stack.active_task_id} 还没有 Blueprint，先补执行大纲会更稳。`,
+    });
+  }
+
+  if (activeCard?.current_blueprint_id) {
+    hints.push({
+      title: "查看当前 Blueprint",
+      command: "pcp_blueprint_show",
+      reason: `当前任务已绑定 Blueprint ${activeCard.current_blueprint_id}，可以先确认这次执行展开图。`,
+    });
+  }
+
+  if (pendingBacklogCount > 0) {
+    hints.push({
+      title: "需要时回顾 backlog",
+      command: "pcp_backlog",
+      reason: `当前主线之外还有 ${pendingBacklogCount} 项 backlog。`,
+    });
+  }
+
+  return hints;
 }
 
 export function approveTaskProposal(

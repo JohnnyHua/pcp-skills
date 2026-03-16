@@ -7,6 +7,7 @@ import {
   approvePendingCompletion,
   appendEvent,
   appendWorklog,
+  buildStatusActionHints,
   compilePlan,
   completeActiveTask,
   createBlueprint,
@@ -710,6 +711,22 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           const pending = getPendingBacklog(dir);
           if (pending.length > 0) {
             lines.push(`📋 Backlog: ${pending.length} 项待回顾`);
+          }
+
+          const activeCard = stack.active_task_id ? readTaskCard(dir, stack.active_task_id) : null;
+          const hints = buildStatusActionHints({
+            stack,
+            activeCard,
+            pendingProposals,
+            pendingBacklogCount: pending.length,
+          });
+          if (hints.length > 0) {
+            lines.push(`\n下一步建议：`);
+            for (const hint of hints) {
+              lines.push(`  - ${hint.title}`);
+              lines.push(`    命令: ${hint.command}`);
+              lines.push(`    原因: ${hint.reason}`);
+            }
           }
 
           return lines.join("\n");

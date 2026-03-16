@@ -61,3 +61,8 @@
 - Extended proposal records and review output with Blueprint source metadata (`source_blueprint_id`, `source_step_index`) for traced subtask suggestions.
 - Updated `pcp_status` to suggest creating a Blueprint only when the current doing task appears complex and still has no active Blueprint.
 - Added [docs/plans/2026-03-16-blueprint-subtask-bridge.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-blueprint-subtask-bridge.md) as the implementation plan for Blueprint-to-subtask bridging.
+- Synced `README.md` and `README.zh.md` with the current approval-first runtime so the documented semantics for `pcp_done`, `pcp_sub`, proposals, `pcp_approve`, handoff/intake, and optional Blueprint usage match the actual plugin behavior.
+- Added reusable status-action hint logic so `pcp_status` can point users to the most likely next command instead of only showing raw queue state.
+- Updated `pcp_status` to surface actionable next steps for pending completion approval, proposal review, optional Blueprint creation/showing, backlog review, and replanning when no active task exists.
+- Added `tests/status-hints.test.ts` to verify the highest-priority guidance paths for gated completion, proposal review, and optional Blueprint use.
+- Added [docs/plans/2026-03-16-status-action-hints.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-status-action-hints.md) as the implementation plan for status action hints.

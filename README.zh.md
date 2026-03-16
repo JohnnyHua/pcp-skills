@@ -76,10 +76,12 @@ npx skills add JohnnyHua/pcp-skills
 ```
 用户提供 todolist / 计划
   → Agent 解析并调用 pcp_plan(tasks)
+  → 批准后的任务被编译成正式 TaskCard 和队列
   → T001 = doing，T002..T005 = 队列待执行
-  → 完成 T001，git commit → 自动推进到 T002
-  → ...
-  → 所有任务完成 → PCP 提示："请 Planner 规划下一轮"
+  → 执行 T001
+  → pcp_done 先提交“完成汇报”
+  → 用户决定是否 pcp_approve 后继续
+  → 当前轮结束，再进入下一轮 plan
 ```
 
 ### 开发中途捕获需求
@@ -114,18 +116,31 @@ Agent：调用 pcp_handoff(audience="Claude Code", focus="继续当前任务")
 | 工具 | 说明 |
 |------|------|
 | `pcp_init` | 扫描项目，建立基础上下文（只需运行一次） |
-| `pcp_plan` | 加载任务列表 — 第一个 = doing，其余 = 队列 |
+| `pcp_plan` | 把已批准的任务列表编译成正式 TaskCard 和队列状态 |
 | `pcp_start` | 手动开启一个 Sprint，指定标题 |
-| `pcp_sub` | 压入子任务（执行完自动返回父任务） |
-| `pcp_done` | 完成当前任务（自动推进队列中下一个） |
+| `pcp_sub` | 提议一个临时子任务；仍需批准后才会变成真正压栈的子任务 |
+| `pcp_done` | 提交当前任务完成汇报；在 `gated` 模式下不会自动推进 |
+| `pcp_approve` | 批准一个待完成任务，让流程继续推进 |
+| `pcp_set_completion_mode` | 切换 `gated` 与 `auto` 两种完成模式 |
 | `pcp_pivot` | 放弃当前任务并记录原因，转向新方向 |
-| `pcp_status` | 查看当前任务、队列和 Backlog |
-| `pcp_handoff` | 为另一个 AI 工具或接手者生成 `.opencode/pcp/HANDOFF.md` |
+| `pcp_status` | 查看当前任务、队列、Backlog、待批准项，以及 Blueprint 提示/状态 |
+| `pcp_handoff` | 为另一个 AI 工具或接手者生成 `.opencode/pcp/HANDOFF.md` 和 `HANDOFF.json` |
+| `pcp_intake` | 在支持 PCP 的环境里恢复一份 machine-readable handoff |
+| `pcp_blueprint_create` | 为当前复杂 doing 任务创建 Blueprint |
+| `pcp_blueprint_show` | 查看当前 Blueprint 或最近的 Blueprint 列表 |
+| `pcp_blueprint_propose_subtask` | 从 Blueprint 的某一步手动生成一个需审批的子任务提议 |
+| `pcp_propose_task` | 记录一个后续任务提议，但不直接变正式 T 任务 |
+| `pcp_list_task_proposals` | 查看待批准和历史 task/subtask proposal |
+| `pcp_approve_task_proposal` | 批准 proposal，让它变成正式队列任务或压栈子任务 |
+| `pcp_reject_task_proposal` | 拒绝 proposal，不影响正式队列 |
 | `pcp_capture` | 将需求存入 Backlog（当前不执行） |
 | `pcp_backlog` | 列出所有待处理的 Backlog 条目 |
 | `pcp_promote` | 将 Backlog 条目提升为当前 Sprint 子任务 |
 | `pcp_dismiss` | 永久忽略一条 Backlog 条目 |
 | `pcp_history` | 完整历史：所有 Sprint + 队列 + Backlog |
+| `pcp_concern_capture` | 记录一个未来阶段需要重新讨论的问题 |
+| `pcp_concern_list` | 查看已记录的 Concern |
+| `pcp_concern_match` | 根据 tags 匹配当前阶段/宿主/产物相关的 Concern |
 
 ## 环境要求
 
