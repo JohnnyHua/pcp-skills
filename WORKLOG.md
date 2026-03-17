@@ -25,3 +25,5 @@
 - 2026-03-16 16:18 Added a manual Blueprint-to-subtask bridge so a Blueprint step can become an approval-gated subtask proposal with source metadata, and `pcp_status` now suggests creating a Blueprint only for complex doing tasks without auto-generating one.
 - 2026-03-16 16:32 Synced both READMEs to the current approval-first PCP runtime so tool descriptions, Blueprint guidance, and the execution loop no longer describe the old auto-advance semantics.
 - 2026-03-16 16:48 Added status action hints so `pcp_status` now points to the most likely next command (approve completion, review proposals, create/show Blueprint, or re-plan) instead of only dumping raw state.
+- 2026-03-17 10:18 Added a unified `pcp_review` entrypoint so pending completion approvals and pending task/subtask proposals can be reviewed from one place without changing the underlying approval commands.
+- 2026-03-17 10:32 Added `pcp_review_apply` so users can choose which review items to approve or reject while PCP executes the underlying approval commands on their behalf.

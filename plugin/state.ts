@@ -309,6 +309,27 @@ export interface StatusActionHint {
   reason: string;
 }
 
+export interface ReviewItem {
+  id: string;
+  kind: "completion" | "task-proposal" | "subtask-proposal";
+  title: string;
+  status: string;
+  reason: string;
+  commands: string[];
+}
+
+export interface ReviewApplyInput {
+  approve_completion?: boolean;
+  approve_proposals?: string[];
+  reject_proposals?: string[];
+}
+
+export interface ReviewApplyResult {
+  approved_completion: boolean;
+  approved_proposals: string[];
+  rejected_proposals: string[];
+}
+
 export function pcpDir(dir: string): string {
   return path.join(dir, ".opencode", "pcp");
 }
@@ -1133,6 +1154,78 @@ export function buildStatusActionHints(input: {
   }
 
   return hints;
+}
+
+export function buildReviewItems(input: {
+  stack: Stack;
+  activeCard: TaskCard | null;
+  pendingProposals: TaskProposalRecord[];
+}): ReviewItem[] {
+  const items: ReviewItem[] = [];
+  const { stack, activeCard, pendingProposals } = input;
+
+  if (stack.pending_completion) {
+    items.push({
+      id: stack.pending_completion.task_id,
+      kind: "completion",
+      title: activeCard?.title ?? stack.pending_completion.task_id,
+      status: "pending_completion",
+      reason: `任务 ${stack.pending_completion.task_id} 已提交完成汇报，等待用户决定是否继续推进。`,
+      commands: ["pcp_approve"],
+    });
+  }
+
+  for (const proposal of pendingProposals) {
+    items.push({
+      id: proposal.id,
+      kind: proposal.kind === "subtask" ? "subtask-proposal" : "task-proposal",
+      title: proposal.title,
+      status: proposal.status,
+      reason:
+        proposal.kind === "subtask"
+          ? `子任务提议仍待批准，父任务是 ${proposal.parent_task_id ?? "unknown"}。`
+          : "正式任务提议仍待批准，尚未进入队列。",
+      commands: [
+        `pcp_approve_task_proposal({ proposal_id: "${proposal.id}" })`,
+        `pcp_reject_task_proposal({ proposal_id: "${proposal.id}" })`,
+      ],
+    });
+  }
+
+  return items;
+}
+
+export function applyReviewActions(
+  dir: string,
+  input: ReviewApplyInput,
+): ReviewApplyResult {
+  ensureDir(dir);
+  const result: ReviewApplyResult = {
+    approved_completion: false,
+    approved_proposals: [],
+    rejected_proposals: [],
+  };
+
+  if (input.approve_completion) {
+    const stack = readStack(dir);
+    if (!stack.pending_completion) {
+      throw new Error("No pending completion to approve");
+    }
+    approvePendingCompletion(dir);
+    result.approved_completion = true;
+  }
+
+  for (const proposalId of input.approve_proposals ?? []) {
+    approveTaskProposal(dir, proposalId);
+    result.approved_proposals.push(proposalId);
+  }
+
+  for (const proposalId of input.reject_proposals ?? []) {
+    rejectTaskProposal(dir, proposalId);
+    result.rejected_proposals.push(proposalId);
+  }
+
+  return result;
 }
 
 export function approveTaskProposal(

@@ -3,10 +3,12 @@ import { tool } from "@opencode-ai/plugin/tool";
 import path from "node:path";
 
 import {
+  applyReviewActions,
   approveTaskProposal,
   approvePendingCompletion,
   appendEvent,
   appendWorklog,
+  buildReviewItems,
   buildStatusActionHints,
   compilePlan,
   completeActiveTask,
@@ -729,6 +731,82 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             }
           }
 
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_review: tool({
+        description:
+          "统一查看当前所有待 review 项，包括待批准完成和待批准 task/subtask proposal，并给出下一步命令。",
+        args: {},
+        async execute(_args, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          const stack = readStack(dir);
+          const activeCard = stack.active_task_id ? readTaskCard(dir, stack.active_task_id) : null;
+          const pendingProposals = listTaskProposals(dir).filter((item) => item.status === "proposed");
+          const items = buildReviewItems({
+            stack,
+            activeCard,
+            pendingProposals,
+          });
+
+          if (items.length === 0) {
+            return "✅ 当前没有待 review 项。";
+          }
+
+          return [
+            `🧾 待 review 项（${items.length} 条）：`,
+            ...items.flatMap((item) => [
+              `- ${item.id} [${item.kind}] ${item.title}`,
+              `  状态: ${item.status}`,
+              `  原因: ${item.reason}`,
+              ...item.commands.map((command) => `  下一步: ${command}`),
+            ]),
+          ].join("\n");
+        },
+      }),
+
+      pcp_review_apply: tool({
+        description:
+          "应用 review 决策。用户只需要决定批准或拒绝哪些项，PCP 负责代为执行现有审批命令。",
+        args: {
+          approve_completion: tool.schema
+            .boolean()
+            .optional()
+            .describe("是否批准当前待完成任务"),
+          approve_proposals: tool.schema
+            .array(tool.schema.string())
+            .optional()
+            .describe("要批准的 proposal ID 列表，如 ['TP001']"),
+          reject_proposals: tool.schema
+            .array(tool.schema.string())
+            .optional()
+            .describe("要拒绝的 proposal ID 列表，如 ['TP002']"),
+        },
+        async execute({ approve_completion = false, approve_proposals = [], reject_proposals = [] }, context) {
+          const dir = context.directory;
+          ensureDir(dir);
+          if (!approve_completion && approve_proposals.length === 0 && reject_proposals.length === 0) {
+            return "❌ 没有提供任何 review 决策。";
+          }
+
+          const result = applyReviewActions(dir, {
+            approve_completion,
+            approve_proposals,
+            reject_proposals,
+          });
+
+          const lines: string[] = ["✅ 已应用 review 决策："];
+          if (result.approved_completion) {
+            lines.push("- 已批准当前待完成任务");
+          }
+          if (result.approved_proposals.length > 0) {
+            lines.push(`- 已批准 proposal: ${result.approved_proposals.join(", ")}`);
+          }
+          if (result.rejected_proposals.length > 0) {
+            lines.push(`- 已拒绝 proposal: ${result.rejected_proposals.join(", ")}`);
+          }
           return lines.join("\n");
         },
       }),

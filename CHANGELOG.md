@@ -66,3 +66,11 @@
 - Updated `pcp_status` to surface actionable next steps for pending completion approval, proposal review, optional Blueprint creation/showing, backlog review, and replanning when no active task exists.
 - Added `tests/status-hints.test.ts` to verify the highest-priority guidance paths for gated completion, proposal review, and optional Blueprint use.
 - Added [docs/plans/2026-03-16-status-action-hints.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-16-status-action-hints.md) as the implementation plan for status action hints.
+- Added reusable `ReviewItem` state so pending completion approval and pending task/subtask proposals can be rendered through one review-oriented path.
+- Exposed `pcp_review` as a unified review entrypoint that lists all pending review items and tells the user which existing command to run next.
+- Added `tests/review.test.ts` to verify completion review items, proposal review items, priority ordering, and empty review state.
+- Added [docs/plans/2026-03-17-pcp-review.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-17-pcp-review.md) as the implementation plan for the unified review entrypoint.
+- Added `applyReviewActions(...)` so review decisions can be applied in one place while still reusing the existing explicit approval/rejection flows.
+- Exposed `pcp_review_apply` so users can select which review items to approve or reject without typing the underlying PCP commands themselves.
+- Added `tests/review-apply.test.ts` to verify approving pending completion, approving proposals, rejecting proposals, and mixed review actions in a single call.
+- Added [docs/plans/2026-03-17-pcp-review-apply.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-17-pcp-review-apply.md) as the implementation plan for review decision application.
