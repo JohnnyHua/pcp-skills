@@ -27,3 +27,5 @@
 - 2026-03-16 16:48 Added status action hints so `pcp_status` now points to the most likely next command (approve completion, review proposals, create/show Blueprint, or re-plan) instead of only dumping raw state.
 - 2026-03-17 10:18 Added a unified `pcp_review` entrypoint so pending completion approvals and pending task/subtask proposals can be reviewed from one place without changing the underlying approval commands.
 - 2026-03-17 10:32 Added `pcp_review_apply` so users can choose which review items to approve or reject while PCP executes the underlying approval commands on their behalf.
+- 2026-03-17 10:44 Added a short PCP quickstart card and linked it from both READMEs so day-to-day usage no longer depends on remembering the full tool reference.
+- 2026-03-17 11:02 Added a narrow natural-language layer for `pcp_review_apply`, so a few explicit phrases like “批准完成，拒绝第二个 proposal” now map onto structured review actions without introducing open-ended semantic intent handling.

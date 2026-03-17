@@ -74,3 +74,8 @@
 - Exposed `pcp_review_apply` so users can select which review items to approve or reject without typing the underlying PCP commands themselves.
 - Added `tests/review-apply.test.ts` to verify approving pending completion, approving proposals, rejecting proposals, and mixed review actions in a single call.
 - Added [docs/plans/2026-03-17-pcp-review-apply.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-17-pcp-review-apply.md) as the implementation plan for review decision application.
+- Added [docs/quickstart.md](/Users/hqc/clawd/pcp/publish/docs/quickstart.md) as a short day-to-day PCP usage card covering the main flow from intake to review_apply.
+- Linked the new quickstart from both `README.md` and `README.zh.md` so users can jump straight to the compact workflow without reading the full reference.
+- Extended `pcp_review_apply` with a narrow natural-language decision path so a few explicit phrases can be mapped onto structured review actions without requiring users to type raw payloads.
+- Added `parseReviewDecisionText(...)` for the first-pass review command mapping layer, covering explicit completion approval, proposal IDs, ordinal proposal references, and “all proposal” shortcuts.
+- Expanded `tests/review-apply.test.ts` to cover narrow natural-language review phrases and all-proposal shortcuts.

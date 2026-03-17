@@ -168,6 +168,7 @@
 - hook / runtime 调试日志与解释层
 - Delivery Bundle 的“专业版 / 中文口语版”双模板
 - 更厚的人审 / 机审 gate 和产物预览层
+- review 阶段的 `semantic intent` 处理，让用户能用更自然的话表达批准/拒绝，而不是只依赖结构化选择
 
 这些内容应先进入 Concern Log 或 backlog，等基础 runtime 稳定后再进入开发。
 

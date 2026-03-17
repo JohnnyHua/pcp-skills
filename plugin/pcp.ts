@@ -24,6 +24,7 @@ import {
   listBlueprints,
   listTaskProposals,
   matchConcerns,
+  parseReviewDecisionText,
   requestTaskCompletion,
   readBlueprint,
   readProjectContext,
@@ -771,6 +772,10 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         description:
           "应用 review 决策。用户只需要决定批准或拒绝哪些项，PCP 负责代为执行现有审批命令。",
         args: {
+          decision_text: tool.schema
+            .string()
+            .optional()
+            .describe("可选：用自然语言表达 review 决策，例如“批准完成，拒绝第二个 proposal”"),
           approve_completion: tool.schema
             .boolean()
             .optional()
@@ -784,17 +789,38 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             .optional()
             .describe("要拒绝的 proposal ID 列表，如 ['TP002']"),
         },
-        async execute({ approve_completion = false, approve_proposals = [], reject_proposals = [] }, context) {
+        async execute({ decision_text, approve_completion = false, approve_proposals = [], reject_proposals = [] }, context) {
           const dir = context.directory;
           ensureDir(dir);
-          if (!approve_completion && approve_proposals.length === 0 && reject_proposals.length === 0) {
+          let parsedApproveCompletion = approve_completion;
+          let parsedApproveProposals = [...approve_proposals];
+          let parsedRejectProposals = [...reject_proposals];
+
+          if (decision_text) {
+            const stack = readStack(dir);
+            const pendingProposals = listTaskProposals(dir).filter((item) => item.status === "proposed");
+            try {
+              const parsed = parseReviewDecisionText(decision_text, {
+                stack,
+                pendingProposals,
+              });
+              parsedApproveCompletion = parsedApproveCompletion || parsed.approve_completion;
+              parsedApproveProposals = [...new Set([...parsedApproveProposals, ...parsed.approve_proposals])];
+              parsedRejectProposals = [...new Set([...parsedRejectProposals, ...parsed.reject_proposals])];
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              return `❌ 无法解析 review 决策：${message}`;
+            }
+          }
+
+          if (!parsedApproveCompletion && parsedApproveProposals.length === 0 && parsedRejectProposals.length === 0) {
             return "❌ 没有提供任何 review 决策。";
           }
 
           const result = applyReviewActions(dir, {
-            approve_completion,
-            approve_proposals,
-            reject_proposals,
+            approve_completion: parsedApproveCompletion,
+            approve_proposals: parsedApproveProposals,
+            reject_proposals: parsedRejectProposals,
           });
 
           const lines: string[] = ["✅ 已应用 review 决策："];

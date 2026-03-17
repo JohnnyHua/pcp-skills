@@ -39,6 +39,12 @@ The long-term goal is to make AI development feel structured instead of improvis
 
 ![PCP Architecture](docs/architecture.svg)
 
+## Quickstart
+
+If PCP is already installed and you only want the shortest day-to-day flow, start here:
+
+- [PCP Quickstart](docs/quickstart.md)
+
 ## Install
 
 ```bash

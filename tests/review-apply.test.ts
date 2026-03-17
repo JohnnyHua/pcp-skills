@@ -10,6 +10,7 @@ import {
   createTaskProposal,
   ensureDir,
   listTaskProposals,
+  parseReviewDecisionText,
   readStack,
   readTaskCard,
   requestTaskCompletion,
@@ -101,4 +102,54 @@ test("supports mixed review actions in one call", () => {
   assert.equal(stack.active_task_id, "T002");
   assert.equal(proposals.find((item) => item.id === "TP001")?.status, "approved");
   assert.equal(proposals.find((item) => item.id === "TP002")?.status, "rejected");
+});
+
+test("parses narrow natural-language review decisions", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pcp-review-parse-"));
+
+  ensureDir(dir);
+  compilePlan(dir, {
+    source: "external-agent",
+    title: "自然语言 review",
+    tasks: ["当前任务", "后续任务"],
+  });
+  requestTaskCompletion(dir, { review: "yes", via: "manual" });
+  createTaskProposal(dir, {
+    title: "第一个提议",
+    detail: "待批准",
+  });
+  createTaskProposal(dir, {
+    title: "第二个提议",
+    detail: "待拒绝",
+  });
+
+  const parsed = parseReviewDecisionText("批准完成，拒绝第二个 proposal，批准 TP001", {
+    stack: readStack(dir),
+    pendingProposals: listTaskProposals(dir).filter((item) => item.status === "proposed"),
+  });
+
+  assert.equal(parsed.approve_completion, true);
+  assert.deepEqual(parsed.approve_proposals, ["TP001"]);
+  assert.deepEqual(parsed.reject_proposals, ["TP002"]);
+});
+
+test("parses all-proposal shortcuts", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pcp-review-parse-all-"));
+
+  ensureDir(dir);
+  createTaskProposal(dir, {
+    title: "提议 A",
+    detail: "待批准",
+  });
+  createTaskProposal(dir, {
+    title: "提议 B",
+    detail: "待批准",
+  });
+
+  const parsed = parseReviewDecisionText("批准全部 proposal", {
+    stack: readStack(dir),
+    pendingProposals: listTaskProposals(dir).filter((item) => item.status === "proposed"),
+  });
+
+  assert.deepEqual(parsed.approve_proposals, ["TP001", "TP002"]);
 });

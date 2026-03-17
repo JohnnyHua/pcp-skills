@@ -1,8 +1,8 @@
 {
   "current_sprint": null,
-  "last_completed_sprint": "SPRINT-2026-03-17-PCP-REVIEW-APPLY",
-  "pending_sprint": "SPRINT-2026-03-17-USAGE-QUICKSTART",
-  "pending_goal": "Add a very short user-facing PCP quickstart so day-to-day usage is easier to remember than the full README reference.",
-  "last_run_at": "2026-03-17T10:32:00+01:00",
-  "notes": "PCP review is now a real user flow: pcp_review shows the pending review items, and pcp_review_apply lets the user choose which ones to approve or reject while PCP executes the underlying commands."
+  "last_completed_sprint": "SPRINT-2026-03-17-REVIEW-NATURAL-LANGUAGE",
+  "pending_sprint": "SPRINT-2026-03-17-REVIEW-SEMANTIC-INTENT",
+  "pending_goal": "Improve review decision parsing beyond the current narrow rules, but keep it in backlog until the team explicitly prioritizes semantic intent handling.",
+  "last_run_at": "2026-03-17T11:02:00+01:00",
+  "notes": "Review decisions now support a narrow natural-language layer for explicit phrases, IDs, ordinal proposal references, and all-proposal shortcuts. Broader semantic intent handling remains intentionally deferred."
 }

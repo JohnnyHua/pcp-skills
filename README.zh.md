@@ -39,6 +39,12 @@ PCP 不是另一个写代码的 Agent，它是一层放在 AI 编程助手之上
 
 ![PCP Architecture](docs/architecture.svg)
 
+## 快速上手
+
+如果你已经装好了 PCP，只想记住日常最短使用流程，直接看：
+
+- [PCP Quickstart](docs/quickstart.md)
+
 ## 安装
 
 ```bash

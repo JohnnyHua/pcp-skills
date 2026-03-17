@@ -330,6 +330,12 @@ export interface ReviewApplyResult {
   rejected_proposals: string[];
 }
 
+export interface ParsedReviewDecision {
+  approve_completion: boolean;
+  approve_proposals: string[];
+  reject_proposals: string[];
+}
+
 export function pcpDir(dir: string): string {
   return path.join(dir, ".opencode", "pcp");
 }
@@ -1226,6 +1232,104 @@ export function applyReviewActions(
   }
 
   return result;
+}
+
+export function parseReviewDecisionText(
+  text: string,
+  context: { stack: Stack; pendingProposals: TaskProposalRecord[] },
+): ParsedReviewDecision {
+  const parsed: ParsedReviewDecision = {
+    approve_completion: false,
+    approve_proposals: [],
+    reject_proposals: [],
+  };
+  const pendingProposals = context.pendingProposals.filter((item) => item.status === "proposed");
+  const byOrder = pendingProposals;
+  const seenApprove = new Set<string>();
+  const seenReject = new Set<string>();
+
+  const segments = text
+    .split(/(?:，|,|；|;|。|\band\b|然后|并且|同时)/i)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    const lower = segment.toLowerCase();
+    const isApprove = /批准|通过|approve|accept|confirm/.test(lower);
+    const isReject = /拒绝|不要|reject|decline/.test(lower);
+    if (!isApprove && !isReject) continue;
+
+    if (/(完成|completion|done)/.test(lower)) {
+      if (isReject) {
+        throw new Error("Rejecting completion is not supported yet");
+      }
+      if (!context.stack.pending_completion) {
+        throw new Error("No pending completion to approve");
+      }
+      parsed.approve_completion = true;
+      continue;
+    }
+
+    if (/(proposal|提议)/.test(lower) || /TP\d+/i.test(segment)) {
+      const targetIds = resolveProposalTargets(segment, byOrder);
+      if (targetIds.length === 0) {
+        throw new Error(`Could not resolve proposal target from: ${segment}`);
+      }
+      if (isApprove) {
+        for (const id of targetIds) {
+          if (!seenApprove.has(id)) {
+            parsed.approve_proposals.push(id);
+            seenApprove.add(id);
+          }
+        }
+      }
+      if (isReject) {
+        for (const id of targetIds) {
+          if (!seenReject.has(id)) {
+            parsed.reject_proposals.push(id);
+            seenReject.add(id);
+          }
+        }
+      }
+    }
+  }
+
+  return parsed;
+}
+
+function resolveProposalTargets(segment: string, proposals: TaskProposalRecord[]): string[] {
+  if (proposals.length === 0) return [];
+
+  if (/(全部|所有|all)/i.test(segment)) {
+    return proposals.map((item) => item.id);
+  }
+
+  const ids = Array.from(new Set((segment.match(/TP\d+/gi) ?? []).map((id) => id.toUpperCase())));
+  if (ids.length > 0) return ids;
+
+  const ordinal = resolveOrdinalIndex(segment);
+  if (ordinal !== null) {
+    const proposal = proposals[ordinal];
+    return proposal ? [proposal.id] : [];
+  }
+
+  if (/(proposal|提议)/i.test(segment) && proposals.length === 1) {
+    return [proposals[0].id];
+  }
+
+  return [];
+}
+
+function resolveOrdinalIndex(segment: string): number | null {
+  const lower = segment.toLowerCase();
+  if (/第?一(个)?|first/.test(lower)) return 0;
+  if (/第?二(个)?|second/.test(lower)) return 1;
+  if (/第?三(个)?|third/.test(lower)) return 2;
+  const digitMatch = lower.match(/第?\s*(\d+)\s*个?/);
+  if (digitMatch) {
+    return Math.max(0, Number.parseInt(digitMatch[1] ?? "1", 10) - 1);
+  }
+  return null;
 }
 
 export function approveTaskProposal(
