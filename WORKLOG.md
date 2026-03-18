@@ -29,3 +29,8 @@
 - 2026-03-17 10:32 Added `pcp_review_apply` so users can choose which review items to approve or reject while PCP executes the underlying approval commands on their behalf.
 - 2026-03-17 10:44 Added a short PCP quickstart card and linked it from both READMEs so day-to-day usage no longer depends on remembering the full tool reference.
 - 2026-03-17 11:02 Added a narrow natural-language layer for `pcp_review_apply`, so a few explicit phrases like “批准完成，拒绝第二个 proposal” now map onto structured review actions without introducing open-ended semantic intent handling.
+- 2026-03-17 12:10 Wrote the `pcp_intake v2` design so intake becomes a unified project onboarding and alignment step, with lightweight summaries for worklog, backlog, concern, and changelog instead of dumping everything by default.
+- 2026-03-17 12:28 Implemented `pcp_intake v2` as a unified onboarding summary path that distinguishes handoff, existing PCP, and plain repos, keeps plain repos read-only, and stops at alignment instead of auto-starting plan or execution.
+- 2026-03-17 13:05 Added intake adoption decisions (`continue / reference_only / restart`) and improved intake project summaries with lightweight type and signal hints so project onboarding reads more like a handoff briefing.
+- 2026-03-17 13:22 Added a formal PCP version baseline so the project can be steered by `v0 / v0.1 / v0.2 / v0.3` milestones instead of relying only on backlog and scattered discussion memory.
+- 2026-03-18 09:18 Added numbered intake follow-up menus so onboarding can stay lightweight by default while still letting users inspect project/worklog/backlog/concern/changelog through simple `1/2/3/4/5/6` choices.

@@ -79,3 +79,10 @@
 - Extended `pcp_review_apply` with a narrow natural-language decision path so a few explicit phrases can be mapped onto structured review actions without requiring users to type raw payloads.
 - Added `parseReviewDecisionText(...)` for the first-pass review command mapping layer, covering explicit completion approval, proposal IDs, ordinal proposal references, and “all proposal” shortcuts.
 - Expanded `tests/review-apply.test.ts` to cover narrow natural-language review phrases and all-proposal shortcuts.
+- Added [docs/plans/2026-03-17-pcp-intake-v2-design.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-17-pcp-intake-v2-design.md) and clarified that future intake should become a unified project onboarding flow with lightweight summaries for worklog, backlog, concern, and changelog.
+- Implemented `pcp_intake v2` as a unified onboarding summary path that can handle handoff, existing PCP state, or a plain repository without auto-starting execution, and added tests for existing-PCP and plain-repo intake flows.
+- Added [docs/plans/2026-03-17-pcp-intake-v2-implementation.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-17-pcp-intake-v2-implementation.md) as the implementation plan for the intake v2 sprint.
+- Added `pcp_intake_adopt` so users can explicitly continue, reference, or restart after intake instead of only receiving suggestions.
+- Improved intake summaries with lightweight project-type and signal hints so onboarding better explains what kind of repo was detected without expanding into deep scans.
+- Added [docs/architecture/pcp-version-baseline.md](/Users/hqc/clawd/pcp/publish/docs/architecture/pcp-version-baseline.md) so PCP now has an explicit `v0 / v0.1 / v0.2 / v0.3` version baseline to guide what belongs in the current phase versus backlog or future concerns.
+- Added numbered intake follow-up navigation so `pcp_intake` now presents simple menu choices and `pcp_intake_followup` can expand project/worklog/backlog/concern/changelog sections via `1 / 2 / 3 / 4 / 5 / 6` instead of requiring users to remember section names.

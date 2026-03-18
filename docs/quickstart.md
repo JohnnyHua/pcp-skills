@@ -7,6 +7,19 @@
 1. 接手项目或恢复上下文  
    用：`pcp_intake`
 
+1.5 接手后决定是否沿用当前流程
+   用：`pcp_intake_adopt`
+
+1.6 如果 intake 后想继续查看记录，不用自己记字段名
+   用：`pcp_intake_followup`
+   也可以直接选：
+   - `1` 项目概况
+   - `2` worklog
+   - `3` backlog
+   - `4` concern
+   - `5` changelog
+   - `6` 继续提问/不展开
+
 2. 把这一轮任务装进 PCP  
    用：`pcp_plan`
 
@@ -50,6 +63,8 @@
 ## 只记这 6 个最常用命令
 
 - `pcp_intake`
+- `pcp_intake_adopt`
+- `pcp_intake_followup`
 - `pcp_plan`
 - `pcp_status`
 - `pcp_done`
@@ -58,4 +73,4 @@
 
 ## 一句话记忆版
 
-`intake -> plan -> status -> do -> done -> review -> review_apply`
+`intake -> intake_adopt -> plan -> status -> do -> done -> review -> review_apply`

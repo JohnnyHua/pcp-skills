@@ -35,6 +35,17 @@ The current implementation already includes:
 
 The long-term goal is to make AI development feel structured instead of improvised: the agent should know what it is doing, why it is doing it, what still needs approval, and how to hand work to the next tool without losing context.
 
+## Current Version Baseline
+
+If you want a higher-level view of where PCP currently stands, start with:
+
+- [PCP Version Baseline](docs/architecture/pcp-version-baseline.md)
+
+This document splits PCP into `v0 / v0.1 / v0.2 / v0.3` so it is easier to tell:
+- what belongs to the current version
+- what should remain backlog
+- what should wait for a later phase
+
 ## Architecture
 
 ![PCP Architecture](docs/architecture.svg)
@@ -131,7 +142,9 @@ Agent: calls pcp_handoff(audience="Claude Code", focus="continue current task")
 | `pcp_pivot` | Abandon current task with reason, start new direction |
 | `pcp_status` | Show current task, queue, backlog, pending approvals, and Blueprint hint/state |
 | `pcp_handoff` | Generate `.opencode/pcp/HANDOFF.md` and `HANDOFF.json` for another AI tool or operator |
-| `pcp_intake` | Resume a machine-readable handoff snapshot in a PCP-aware environment |
+| `pcp_intake` | Unified project intake entry: prefer handoff when present, otherwise understand the repo and existing PCP state first, then stop and wait for the user's next decision |
+| `pcp_intake_adopt` | Explicitly decide after intake whether to continue the current flow, keep it as reference only, or ignore the current flow and restart |
+| `pcp_intake_followup` | Expand one intake section on demand after onboarding, such as worklog, backlog, concern, or changelog |
 | `pcp_blueprint_create` | Create a Blueprint for the current complex doing task |
 | `pcp_blueprint_show` | Show the active Blueprint or list recent Blueprints |
 | `pcp_blueprint_propose_subtask` | Turn a chosen Blueprint step into an approval-gated subtask proposal |

@@ -150,6 +150,65 @@ export interface IntakeResult {
   queue_count: number;
 }
 
+export type IntakeSourceKind = "handoff" | "existing_pcp" | "plain_repo";
+
+export interface IntakeSummary {
+  source: IntakeSourceKind;
+  source_path: string | null;
+  project: {
+    summary: string;
+    kind: string;
+    detail: string | null;
+    key_files: string[];
+    signals: string[];
+    has_pcp: boolean;
+  };
+  flow: {
+    active_task_id: string | null;
+    active_task_title: string | null;
+    queue_count: number;
+    pending_review_count: number;
+    pending_proposal_count: number;
+  };
+  records: {
+    has_worklog: boolean;
+    worklog_summary: string[];
+    backlog_count: number;
+    concern_count: number;
+    changelog_summary: string[];
+  };
+  next_steps: string[];
+}
+
+export type IntakeAdoptionDecision = "continue" | "reference_only" | "restart";
+
+export interface IntakeAdoptionResult {
+  decision: IntakeAdoptionDecision;
+  source: IntakeSourceKind;
+  active_task_id: string | null;
+  queue_count: number;
+}
+
+export type IntakeFollowupSection =
+  | "project"
+  | "worklog"
+  | "backlog"
+  | "concern"
+  | "changelog"
+  | "options";
+
+function intakeFollowupMenu(): string[] {
+  return [
+    "接下来你可以继续查看：",
+    "1. 查看项目概况",
+    "2. 查看 worklog",
+    "3. 查看 backlog",
+    "4. 查看 concern",
+    "5. 查看 changelog",
+    "6. 其他 / 继续提问",
+  ];
+}
+
 export interface PlanInput {
   source: string;
   title: string;
@@ -1709,9 +1768,11 @@ function tryRead(p: string, maxChars = 400): string | null {
   }
 }
 
-export function scanProject(dir: string): { summary: string; detail: string; key_files: string[] } {
+export function scanProject(dir: string): { summary: string; kind: string; detail: string; key_files: string[]; signals: string[] } {
   const facts: string[] = [];
   const detail: string[] = [];
+  const signals: string[] = [];
+  let kind = "普通代码仓库";
 
   const pkg = tryRead(path.join(dir, "package.json"));
   if (pkg) {
@@ -1728,6 +1789,12 @@ export function scanProject(dir: string): { summary: string; detail: string; key
       const frameworks = ["next", "react", "vue", "svelte", "express", "fastify", "hono"]
         .filter((framework) => deps?.[framework] || deps?.[`@${framework}/core`]);
       if (frameworks.length > 0) facts.push(`(${frameworks.join(", ")})`);
+      if (frameworks.length > 0) {
+        signals.push(`package.json: ${frameworks.join(", ")}`);
+      } else {
+        signals.push("package.json");
+      }
+      kind = frameworks.length > 0 ? `Node/TS 项目（${frameworks.join(", ")}）` : "Node/TS 项目";
     } catch {
       // ignore malformed package manifest
     }
@@ -1744,6 +1811,10 @@ export function scanProject(dir: string): { summary: string; detail: string; key
     const desc = manifest[2]?.exec(content)?.[1];
     if (name) facts.push(name);
     if (desc) facts.push(desc);
+    if (manifest[0] === "pyproject.toml") kind = "Python 项目";
+    if (manifest[0] === "go.mod") kind = "Go 项目";
+    if (manifest[0] === "Cargo.toml") kind = "Rust 项目";
+    signals.push(manifest[0]);
   }
 
   for (const name of ["README.md", "README.rst", "README.txt", "README"]) {
@@ -1757,6 +1828,7 @@ export function scanProject(dir: string): { summary: string; detail: string; key
       .filter((paragraph) => paragraph.length > 20 && !paragraph.startsWith("```"));
     if (paragraphs[0]) {
       detail.push(`README: ${paragraphs[0].slice(0, 200)}`);
+      signals.push(name);
     }
     break;
   }
@@ -1767,6 +1839,7 @@ export function scanProject(dir: string): { summary: string; detail: string; key
       .split(/\n\n+/)
       .find((paragraph) => paragraph.trim().length > 20 && !paragraph.startsWith("#"));
     if (firstPara) detail.push(`CLAUDE.md: ${firstPara.trim().slice(0, 150)}`);
+    signals.push("CLAUDE.md");
   }
 
   const entries = [
@@ -1776,10 +1849,13 @@ export function scanProject(dir: string): { summary: string; detail: string; key
     "main.go", "cmd/main.go",
     "src/main.rs", "src/lib.rs",
   ].filter((entry) => fs.existsSync(path.join(dir, entry)));
-  if (entries.length > 0) detail.push(`入口: ${entries.slice(0, 3).join(", ")}`);
+  if (entries.length > 0) {
+    detail.push(`入口: ${entries.slice(0, 3).join(", ")}`);
+    signals.push(`入口: ${entries.slice(0, 2).join(", ")}`);
+  }
 
   const summary = facts.filter(Boolean).join(" ").slice(0, 100) || path.basename(dir);
-  return { summary, detail: detail.join("\n"), key_files: entries.slice(0, 5) };
+  return { summary, kind, detail: detail.join("\n"), key_files: entries.slice(0, 5), signals: Array.from(new Set(signals)).slice(0, 4) };
 }
 
 function extractProjectStatus(projectJson: ProjectData | null, projectMd: string | null): string | null {
@@ -1806,6 +1882,10 @@ function readWorklogEntries(dir: string, limit: number): string[] {
     .slice(-limit);
 }
 
+export function readWorklogSummary(dir: string, limit: number): string[] {
+  return readWorklogEntries(dir, limit);
+}
+
 function formatEventSummary(event: PcpEvent): string {
   switch (event.e) {
     case "created":
@@ -1829,6 +1909,74 @@ function formatEventSummary(event: PcpEvent): string {
     default:
       return event.e;
   }
+}
+
+function hasPcpState(dir: string): boolean {
+  const root = pcpDir(dir);
+  if (!fs.existsSync(root)) return false;
+  return [
+    path.join(root, "stack.json"),
+    path.join(root, "events.jsonl"),
+    path.join(root, "PROJECT.json"),
+    path.join(root, "PROJECT.md"),
+    path.join(root, "HANDOFF.json"),
+  ].some((file) => fs.existsSync(file));
+}
+
+function detectIntakeSource(dir: string): IntakeSourceKind {
+  if (fs.existsSync(handoffJsonPath(dir))) return "handoff";
+  if (hasPcpState(dir)) return "existing_pcp";
+  return "plain_repo";
+}
+
+function readRecentChangelogEntries(dir: string, limit: number): string[] {
+  const changelogPath = path.join(dir, "CHANGELOG.md");
+  if (!fs.existsSync(changelogPath)) return [];
+  const content = fs.readFileSync(changelogPath, "utf8");
+  const unreleasedMatch = content.match(/## Unreleased\n([\s\S]*?)(?=\n## |\n*$)/);
+  if (!unreleasedMatch?.[1]) return [];
+  return unreleasedMatch[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .slice(0, limit);
+}
+
+export function readChangelogSummary(dir: string, limit: number): string[] {
+  return readRecentChangelogEntries(dir, limit);
+}
+
+function buildProjectSummary(dir: string): {
+  summary: string;
+  kind: string;
+  detail: string | null;
+  key_files: string[];
+  signals: string[];
+  has_pcp: boolean;
+} {
+  const pcpPresent = hasPcpState(dir);
+  const projectJson = readProjectJson(dir);
+  const projectContext = readProjectContext(dir);
+  if (projectJson || projectContext) {
+    return {
+      summary: projectJson?.summary ?? projectContext ?? path.basename(dir),
+      kind: "已接入 PCP 的项目",
+      detail: projectJson?.detail ?? null,
+      key_files: projectJson?.key_files ?? [],
+      signals: projectJson?.key_files?.slice(0, 3) ?? [],
+      has_pcp: pcpPresent,
+    };
+  }
+
+  const scanned = scanProject(dir);
+  return {
+    summary: scanned.summary,
+    kind: pcpPresent ? "已接入 PCP 的项目" : scanned.kind,
+    detail: scanned.detail || null,
+    key_files: scanned.key_files,
+    signals: scanned.signals,
+    has_pcp: pcpPresent,
+  };
 }
 
 export function buildHandoffMarkdown(dir: string, options: HandoffOptions = {}): string {
@@ -2064,6 +2212,198 @@ export function readHandoffSnapshot(dir: string): HandoffSnapshot | null {
   } catch {
     return null;
   }
+}
+
+export function buildIntakeSummary(dir: string): IntakeSummary {
+  const source = detectIntakeSource(dir);
+  const project = buildProjectSummary(dir);
+  const stack = hasPcpState(dir) ? readStack(dir) : {
+    next_id: 1,
+    backlog_next_id: 1,
+    plan_next_id: 1,
+    blueprint_next_id: 1,
+    active_stack: [],
+    active_task_id: null,
+    ready_tasks: [],
+    completion_mode: "gated" as CompletionMode,
+    pending_completion: null,
+  };
+  const tasks = hasPcpState(dir) ? replayEvents(dir) : [];
+  const activeTask = stack.active_task_id ? getTask(tasks, stack.active_task_id) : null;
+  const pendingProposals = hasPcpState(dir)
+    ? listTaskProposals(dir).filter((item) => item.status === "proposed")
+    : [];
+  const backlogCount = hasPcpState(dir) ? getPendingBacklog(dir).length : 0;
+  const concernCount = hasPcpState(dir)
+    ? listConcerns(dir).filter((item) => item.status === "open" || item.status === "triggered").length
+    : 0;
+  const worklogSummary = hasPcpState(dir) ? readWorklogEntries(dir, 3) : [];
+  const changelogSummary = readRecentChangelogEntries(dir, 3);
+
+  const nextSteps: string[] = [];
+  if (source === "handoff") {
+    nextSteps.push("我已经基于 handoff 接手了当前上下文，接下来你可以先确认我的理解是否正确。");
+    if (activeTask) {
+      nextSteps.push(`如果你要继续现有流程，我下一步可以先查看 [${activeTask.id}] ${activeTask.title}。`);
+    }
+  } else if (source === "existing_pcp") {
+    nextSteps.push("我已经识别到这个项目里有现成的 PCP 流程。");
+    nextSteps.push("你可以先决定：沿用当前流程、部分参考，还是忽略它并重新开始。");
+  } else {
+    nextSteps.push("这个项目还没有接入 PCP。");
+    nextSteps.push("如果你愿意，我下一步可以在你确认目标后帮你进入 PCP 流程。");
+  }
+
+  if (worklogSummary.length > 0) {
+    nextSteps.push("如果你想，我可以展开最近的 Worklog，先看前面做到了哪里。");
+  }
+  if (backlogCount > 0) {
+    nextSteps.push("如果你想，我也可以展开 backlog，看当前有哪些暂缓项。");
+  }
+  if (concernCount > 0) {
+    nextSteps.push("Concern Log 里也有未关闭的问题；需要的话我可以再展开。");
+  }
+
+  return {
+    source,
+    source_path: source === "handoff" ? handoffJsonPath(dir) : null,
+    project,
+    flow: {
+      active_task_id: activeTask?.id ?? stack.active_task_id ?? null,
+      active_task_title: activeTask?.title ?? null,
+      queue_count: stack.ready_tasks.length,
+      pending_review_count: stack.pending_completion ? 1 : 0,
+      pending_proposal_count: pendingProposals.length,
+    },
+    records: {
+      has_worklog: worklogSummary.length > 0,
+      worklog_summary: worklogSummary,
+      backlog_count: backlogCount,
+      concern_count: concernCount,
+      changelog_summary: changelogSummary,
+    },
+    next_steps: nextSteps,
+  };
+}
+
+export function applyIntakeAdoptionDecision(
+  dir: string,
+  decision: IntakeAdoptionDecision,
+): IntakeAdoptionResult {
+  const source = detectIntakeSource(dir);
+
+  if (decision === "restart" && hasPcpState(dir)) {
+    const stack = readStack(dir);
+    stack.active_stack = [];
+    stack.active_task_id = null;
+    stack.ready_tasks = [];
+    stack.pending_completion = null;
+    writeStack(dir, stack);
+    appendWorklog(dir, "🧭 intake 选择 restart：忽略当前 PCP 主线，等待重新规划");
+    return {
+      decision,
+      source,
+      active_task_id: null,
+      queue_count: 0,
+    };
+  }
+
+  if (decision === "reference_only") {
+    appendWorklog(dir, "🧭 intake 选择 reference_only：仅参考当前流程，不直接沿用主线");
+  } else {
+    appendWorklog(dir, `🧭 intake 选择 continue：沿用当前${source === "plain_repo" ? "项目理解" : " PCP"}流程`);
+  }
+
+  const stack = hasPcpState(dir) ? readStack(dir) : {
+    next_id: 1,
+    backlog_next_id: 1,
+    plan_next_id: 1,
+    blueprint_next_id: 1,
+    active_stack: [],
+    active_task_id: null,
+    ready_tasks: [],
+    completion_mode: "gated" as CompletionMode,
+    pending_completion: null,
+  };
+
+  return {
+    decision,
+    source,
+    active_task_id: stack.active_task_id,
+    queue_count: stack.ready_tasks.length,
+  };
+}
+
+export function buildIntakeFollowup(
+  dir: string,
+  section: IntakeFollowupSection,
+): string {
+  const summary = buildIntakeSummary(dir);
+
+  if (section === "options") {
+    return [
+      "🤝 Intake Follow-up",
+      ...intakeFollowupMenu(),
+    ].join("\n");
+  }
+
+  if (section === "project") {
+    const lines = [
+      "## 项目概况（展开）",
+      `- 摘要：${summary.project.summary}`,
+      `- 类型：${summary.project.kind}`,
+    ];
+    if (summary.project.signals.length > 0) {
+      lines.push(`- 识别线索：${summary.project.signals.join("；")}`);
+    }
+    if (summary.project.key_files.length > 0) {
+      lines.push(`- 关键文件：${summary.project.key_files.join(", ")}`);
+    }
+    if (summary.project.detail) {
+      lines.push("- 扫描详情：");
+      lines.push(...summary.project.detail.split("\n").map((line) => `  ${line}`));
+    }
+    lines.push("", ...intakeFollowupMenu());
+    return lines.join("\n");
+  }
+
+  if (section === "worklog") {
+    const entries = hasPcpState(dir) ? readWorklogSummary(dir, 8) : [];
+    if (entries.length === 0) {
+      return ["📝 当前没有可展开的 Worklog。", "", ...intakeFollowupMenu()].join("\n");
+    }
+    return ["📝 最近 Worklog：", ...entries.map((entry) => `  ${entry}`), "", ...intakeFollowupMenu()].join("\n");
+  }
+
+  if (section === "backlog") {
+    const items = hasPcpState(dir) ? getPendingBacklog(dir) : [];
+    if (items.length === 0) return ["📋 当前 backlog 为空。", "", ...intakeFollowupMenu()].join("\n");
+    return [
+      `📋 Backlog（${items.length} 项）：`,
+      ...items.map((item) => `  ${item.id}: ${item.title}${item.detail ? ` — ${item.detail}` : ""}`),
+      "",
+      ...intakeFollowupMenu(),
+    ].join("\n");
+  }
+
+  if (section === "concern") {
+    const items = hasPcpState(dir)
+      ? listConcerns(dir).filter((item) => item.status === "open" || item.status === "triggered")
+      : [];
+    if (items.length === 0) return ["🧭 当前没有需要展开的 Concern。", "", ...intakeFollowupMenu()].join("\n");
+    return [
+      `🧭 Concern（${items.length} 条）：`,
+      ...items.map((item) => `  ${item.id}: ${item.title} [${item.tags.join(", ")}]`),
+      "",
+      ...intakeFollowupMenu(),
+    ].join("\n");
+  }
+
+  const changelog = readChangelogSummary(dir, 8);
+  if (changelog.length === 0) {
+    return ["📦 当前没有可展开的 Changelog 摘要。", "", ...intakeFollowupMenu()].join("\n");
+  }
+  return ["📦 最近 Changelog：", ...changelog.map((line) => `  ${line}`), "", ...intakeFollowupMenu()].join("\n");
 }
 
 function markTaskHandoffStatus(dir: string, taskId: string | null, status: TaskCardHandoffStatus, actor: string): void {

@@ -4,11 +4,14 @@ import path from "node:path";
 
 import {
   applyReviewActions,
+  applyIntakeAdoptionDecision,
+  buildIntakeFollowup,
   approveTaskProposal,
   approvePendingCompletion,
   appendEvent,
   appendWorklog,
   buildReviewItems,
+  buildIntakeSummary,
   buildStatusActionHints,
   compilePlan,
   completeActiveTask,
@@ -1069,29 +1072,157 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
 
       pcp_intake: tool({
         description:
-          "读取当前 PCP handoff 语义文件，恢复最小接手上下文，并记录一次 intake。",
+          "统一项目接手入口：优先利用 handoff，没有 handoff 时也会先理解项目和现有 PCP 状态，再停在等待用户决定下一步。",
         args: {},
         async execute(_args, context) {
           const dir = context.directory;
-          const result = intakeHandoff(dir);
-          const stack = readStack(dir);
-          const tasks = replayEvents(dir);
-          const activeTask = result.active_task_id ? getTask(tasks, result.active_task_id) : null;
+          const summary = buildIntakeSummary(dir);
 
-          const lines = [
-            `🤝 已读取 handoff：${result.source_path}`,
-            "",
-          ];
-          if (activeTask) {
-            lines.push(`📌 当前恢复任务： [${activeTask.id}] ${activeTask.title}`);
+          if (summary.source === "handoff") {
+            intakeHandoff(dir);
+          }
+
+          const lines = ["🤝 PCP Intake", ""];
+          lines.push(`来源：${summary.source === "handoff" ? "handoff" : summary.source === "existing_pcp" ? "existing PCP" : "普通仓库"}`);
+          if (summary.source_path) {
+            lines.push(`语义文件：${summary.source_path}`);
+          }
+          lines.push("");
+
+          lines.push("## 项目概况");
+          lines.push(`- 摘要：${summary.project.summary}`);
+          lines.push(`- 类型：${summary.project.kind}`);
+          if (summary.project.signals.length > 0) {
+            lines.push(`- 识别线索：${summary.project.signals.join("；")}`);
+          }
+          if (summary.project.key_files.length > 0) {
+            lines.push(`- 关键文件：${summary.project.key_files.join(", ")}`);
+          }
+          if (summary.project.detail) {
+            const detailLines = summary.project.detail.split("\n").slice(0, 3);
+            lines.push("- 扫描摘要：");
+            lines.push(...detailLines.map((line) => `  ${line}`));
+          }
+          lines.push("");
+
+          lines.push("## 当前流程状态");
+          if (summary.flow.active_task_id) {
+            lines.push(`- 当前任务： [${summary.flow.active_task_id}] ${summary.flow.active_task_title ?? ""}`.trim());
           } else {
-            lines.push("📌 当前恢复任务：无");
+            lines.push("- 当前任务：无");
           }
-          lines.push(`⏳ 当前队列数：${result.queue_count}`);
-          if (!stack.active_task_id && stack.ready_tasks.length === 0) {
-            lines.push("💡 当前没有活动任务，建议重新规划。");
+          lines.push(`- 队列数：${summary.flow.queue_count}`);
+          lines.push(`- 待审批完成：${summary.flow.pending_review_count}`);
+          lines.push(`- 待审批 proposal：${summary.flow.pending_proposal_count}`);
+          lines.push("");
+
+          lines.push("## 辅助记录");
+          lines.push(`- Worklog：${summary.records.has_worklog ? "有，记录最近开发过程" : "无"}`);
+          if (summary.records.worklog_summary.length > 0) {
+            lines.push(...summary.records.worklog_summary.map((entry) => `  ${entry}`));
           }
+          lines.push(`- Backlog：${summary.records.backlog_count} 项（暂时不做但不能丢）`);
+          lines.push(`- Concern Log：${summary.records.concern_count} 项（未来阶段要重新讨论的问题）`);
+          if (summary.records.changelog_summary.length > 0) {
+            lines.push("- Changelog：最近结果摘要：");
+            lines.push(...summary.records.changelog_summary.map((entry) => `  ${entry}`));
+          } else {
+            lines.push("- Changelog：暂无可读摘要");
+          }
+          lines.push("");
+
+          lines.push("## 下一步建议");
+          lines.push(...summary.next_steps.map((item, index) => `${index + 1}. ${item}`));
+          lines.push("");
+          lines.push("## 可以继续查看");
+          lines.push("1. 查看项目概况");
+          lines.push("2. 查看 worklog");
+          lines.push("3. 查看 backlog");
+          lines.push("4. 查看 concern");
+          lines.push("5. 查看 changelog");
+          lines.push("6. 其他 / 继续提问");
+          lines.push("");
+          lines.push("目前我先停在接手和对齐认知，不会自动进入 plan。你可以先提问、纠正，或者直接告诉我要不要继续当前流程。");
           return lines.join("\n");
+        },
+      }),
+
+      pcp_intake_adopt: tool({
+        description:
+          "在 pcp_intake 之后显式决定如何处理当前接手结果：继续沿用、仅作参考、或忽略现有主线并重新开始。",
+        args: {
+          decision: tool.schema
+            .string()
+            .describe("接手决定：continue | reference_only | restart"),
+        },
+        async execute({ decision }, context) {
+          const dir = context.directory;
+          const normalized =
+            decision === "continue" || decision === "reference_only" || decision === "restart"
+              ? decision
+              : null;
+          if (!normalized) {
+            return "❌ decision 只能是 continue / reference_only / restart";
+          }
+
+          const result = applyIntakeAdoptionDecision(dir, normalized);
+          const lines = [`🧭 已记录 intake 决定：${result.decision}`, ""];
+
+          if (result.decision === "continue") {
+            if (result.active_task_id) {
+              lines.push(`📌 当前继续沿用任务：${result.active_task_id}`);
+            } else {
+              lines.push("📌 当前没有活动任务，但现有流程已保留。");
+            }
+            lines.push(`⏳ 当前队列数：${result.queue_count}`);
+            lines.push("💡 下一步可以先用 pcp_status 或 pcp_review 看当前状态。");
+          } else if (result.decision === "reference_only") {
+            lines.push("📎 当前流程只作为参考，不直接沿用主线。");
+            lines.push("💡 如果你要开始新一轮，可以直接告诉我要重新 plan。");
+          } else {
+            lines.push("🧹 当前 PCP 主线已清空，现有历史仍然保留。");
+            lines.push("💡 下一步建议重新规划，再进入 pcp_plan。");
+          }
+
+          return lines.join("\n");
+        },
+      }),
+
+      pcp_intake_followup: tool({
+        description:
+          "在 pcp_intake 之后按需展开某一类记录，避免一开始把 Worklog、Backlog、Concern、Changelog 全部堆出来。",
+        args: {
+          section: tool.schema
+            .string()
+            .describe("可选：project | worklog | backlog | concern | changelog | options，或 1/2/3/4/5/6"),
+        },
+        async execute({ section }, context) {
+          const dir = context.directory;
+          const normalized =
+            section === "1"
+              ? "project"
+              : section === "2"
+                ? "worklog"
+                : section === "3"
+                  ? "backlog"
+                  : section === "4"
+                    ? "concern"
+                    : section === "5"
+                      ? "changelog"
+                      : section === "6"
+                        ? "options"
+                        : section === "project" ||
+                            section === "worklog" ||
+                            section === "backlog" ||
+                            section === "concern" ||
+                            section === "changelog" ||
+                            section === "options"
+                          ? section
+                          : null;
+          if (!normalized) {
+            return "❌ section 只能是 project / worklog / backlog / concern / changelog / options，或者 1 / 2 / 3 / 4 / 5 / 6";
+          }
+          return buildIntakeFollowup(dir, normalized);
         },
       }),
 

@@ -1,8 +1,8 @@
 {
-  "current_sprint": null,
-  "last_completed_sprint": "SPRINT-2026-03-17-REVIEW-NATURAL-LANGUAGE",
-  "pending_sprint": "SPRINT-2026-03-17-REVIEW-SEMANTIC-INTENT",
-  "pending_goal": "Improve review decision parsing beyond the current narrow rules, but keep it in backlog until the team explicitly prioritizes semantic intent handling.",
-  "last_run_at": "2026-03-17T11:02:00+01:00",
-  "notes": "Review decisions now support a narrow natural-language layer for explicit phrases, IDs, ordinal proposal references, and all-proposal shortcuts. Broader semantic intent handling remains intentionally deferred."
+  "current_sprint": "SPRINT-2026-03-18-INTAKE-QUESTION-FOLLOWUP",
+  "last_completed_sprint": "SPRINT-2026-03-18-INTAKE-QUESTION-FOLLOWUP",
+  "pending_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-DESIGN",
+  "pending_goal": "Design a protected project baseline file that PCP can read during intake and refresh only through explicit user-approved updates.",
+  "last_run_at": "2026-03-18T09:18:00+01:00",
+  "notes": "Intake follow-up now uses a numbered menu so users can inspect records without remembering tool argument names. PCP remains in late v0 / early v0.1 onboarding refinement."
 }

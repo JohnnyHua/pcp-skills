@@ -35,6 +35,17 @@ PCP 不是另一个写代码的 Agent，它是一层放在 AI 编程助手之上
 
 它最终想做到的是：让 AI 参与开发时不再像“临场 improvisation”，而是始终知道自己现在在做什么、为什么这样做、哪些东西还没审批、以及切换工具时如何稳定交接上下文。
 
+## 当前版本基线
+
+如果你想从“上帝视角”理解这个项目现在做到哪了，先看：
+
+- [PCP 版本基线](docs/architecture/pcp-version-baseline.md)
+
+这份文档会把 PCP 分成 `v0 / v0.1 / v0.2 / v0.3`，帮助你区分：
+- 当前版本必须完成什么
+- 哪些只是 backlog
+- 哪些应该留到下一版
+
 ## 架构图
 
 ![PCP Architecture](docs/architecture.svg)
@@ -131,7 +142,9 @@ Agent：调用 pcp_handoff(audience="Claude Code", focus="继续当前任务")
 | `pcp_pivot` | 放弃当前任务并记录原因，转向新方向 |
 | `pcp_status` | 查看当前任务、队列、Backlog、待批准项，以及 Blueprint 提示/状态 |
 | `pcp_handoff` | 为另一个 AI 工具或接手者生成 `.opencode/pcp/HANDOFF.md` 和 `HANDOFF.json` |
-| `pcp_intake` | 在支持 PCP 的环境里恢复一份 machine-readable handoff |
+| `pcp_intake` | 统一项目接手入口：优先利用 handoff，没有 handoff 时也会先理解项目和现有 PCP 状态，再停在“等待用户决定下一步” |
+| `pcp_intake_adopt` | 在 intake 之后显式决定：沿用当前流程、仅作参考，或忽略现有主线并重新开始 |
+| `pcp_intake_followup` | 在 intake 之后按需展开某一类记录，例如 worklog、backlog、concern 或 changelog |
 | `pcp_blueprint_create` | 为当前复杂 doing 任务创建 Blueprint |
 | `pcp_blueprint_show` | 查看当前 Blueprint 或最近的 Blueprint 列表 |
 | `pcp_blueprint_propose_subtask` | 从 Blueprint 的某一步手动生成一个需审批的子任务提议 |
