@@ -184,7 +184,7 @@ PCP 所有数据本地存储在 `{项目目录}/.opencode/pcp/`：
 - `events.jsonl` — 追加写入的事件日志（完整历史）
 - `stack.json` — 当前状态缓存（含 ready_tasks 队列）
 - `WORKLOG.md` — 供 `pcp_handoff` 汇总的时间线工作记录
-- `PROJECT.md` / `PROJECT.json` — 项目基线与现状快照
+- `PROJECT.md` — 项目基线与现状快照
 - `HANDOFF.md` — 按需生成的跨工具上下文交接文档
 
 数据不会离开你的机器。

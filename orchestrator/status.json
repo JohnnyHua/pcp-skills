@@ -1,8 +1,8 @@
 {
-  "current_sprint": "SPRINT-2026-03-18-INTAKE-QUESTION-FOLLOWUP",
-  "last_completed_sprint": "SPRINT-2026-03-18-INTAKE-QUESTION-FOLLOWUP",
-  "pending_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-DESIGN",
-  "pending_goal": "Design a protected project baseline file that PCP can read during intake and refresh only through explicit user-approved updates.",
-  "last_run_at": "2026-03-18T09:18:00+01:00",
-  "notes": "Intake follow-up now uses a numbered menu so users can inspect records without remembering tool argument names. PCP remains in late v0 / early v0.1 onboarding refinement."
+  "current_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-IMPLEMENTATION",
+  "last_completed_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-IMPLEMENTATION",
+  "pending_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-REFRESH-DESIGN",
+  "pending_goal": "Design how PROJECT.md should be refreshed through explicit user-approved updates rather than ordinary execution flow edits.",
+  "last_run_at": "2026-03-18T09:52:00+01:00",
+  "notes": "PROJECT.md is now the primary project baseline artifact. PCP intake can read it directly, but refresh/update flow is still undefined and should be designed next."
 }

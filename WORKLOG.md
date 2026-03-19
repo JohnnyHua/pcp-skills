@@ -34,3 +34,5 @@
 - 2026-03-17 13:05 Added intake adoption decisions (`continue / reference_only / restart`) and improved intake project summaries with lightweight type and signal hints so project onboarding reads more like a handoff briefing.
 - 2026-03-17 13:22 Added a formal PCP version baseline so the project can be steered by `v0 / v0.1 / v0.2 / v0.3` milestones instead of relying only on backlog and scattered discussion memory.
 - 2026-03-18 09:18 Added numbered intake follow-up menus so onboarding can stay lightweight by default while still letting users inspect project/worklog/backlog/concern/changelog through simple `1/2/3/4/5/6` choices.
+- 2026-03-18 09:34 Wrote the first `PROJECT.md` baseline design so PCP can later read a protected project baseline containing project purpose, architecture, version roadmap, current state, and constraints.
+- 2026-03-18 09:52 Implemented the first `PROJECT.md` baseline path so `pcp_init` now generates only Markdown, intake can reuse that baseline, and ordinary execution flow still treats it as read-mostly project context.

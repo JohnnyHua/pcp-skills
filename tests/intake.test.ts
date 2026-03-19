@@ -205,3 +205,26 @@ test("intake followup expands specific sections on demand", () => {
   assert.match(concern, /自动起任务刷屏/);
   assert.match(worklog, /intake 说明/);
 });
+
+test("project baseline is generated as PROJECT.md and reused by intake summary", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pcp-project-baseline-"));
+
+  ensureDir(dir);
+  writeProjectFiles(dir, {
+    name: "pcp-skills",
+    summary: "用于 AI 编程代理的流程控制层",
+    detail: "plugin/pcp.ts 负责工具与 hook。\nplugin/state.ts 负责状态持久化。",
+    extra: null,
+    key_files: ["plugin/pcp.ts", "plugin/state.ts"],
+    status: "当前处于 v0 收尾阶段，重点是 intake 体验收口。",
+    updated_at: "2026-03-18",
+  });
+
+  assert.equal(fs.existsSync(path.join(dir, ".opencode", "pcp", "PROJECT.md")), true);
+  assert.equal(fs.existsSync(path.join(dir, ".opencode", "pcp", "PROJECT.json")), false);
+
+  const summary = buildIntakeSummary(dir);
+  assert.equal(summary.project.has_pcp, true);
+  assert.match(summary.project.summary, /流程控制层/);
+  assert.deepEqual(summary.project.key_files, ["plugin/pcp.ts", "plugin/state.ts"]);
+});

@@ -266,7 +266,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
             ts: Date.now(),
           });
 
-          // Generate PROJECT.md + PROJECT.json
+          // Generate PROJECT.md baseline
           const projectData: ProjectData = {
             name: summary.split("；")[0] || path.basename(dir),
             summary: full,
@@ -289,7 +289,7 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           }
           lines.push(
             ``,
-            `📝 已生成 .opencode/pcp/PROJECT.md — 建议补充"现状"部分`,
+            `📝 已生成 .opencode/pcp/PROJECT.md — 建议补充"当前状态"部分`,
             `🌐 浏览器预览：.opencode/pcp/PROJECT.html`,
             `📝 已初始化 .opencode/pcp/WORKLOG.md — 后续操作自动记录`,
             ``,

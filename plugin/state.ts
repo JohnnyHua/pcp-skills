@@ -75,6 +75,14 @@ export interface ProjectData {
   updated_at: string;
 }
 
+interface ProjectBaselineSummary {
+  name: string | null;
+  summary: string | null;
+  detail: string | null;
+  key_files: string[];
+  status: string | null;
+}
+
 export interface ConcernInput {
   title: string;
   detail: string;
@@ -572,28 +580,59 @@ export function appendWorklog(dir: string, line: string): void {
 }
 
 export function writeProjectFiles(dir: string, data: ProjectData): void {
-  fs.writeFileSync(
-    path.join(pcpDir(dir), "PROJECT.json"),
-    JSON.stringify(data, null, 2),
-  );
+  const lines = ["# 项目基线", ""];
+  lines.push("## 项目基线");
+  lines.push(`- 名称：${data.name}`);
+  lines.push(`- 摘要：${data.summary}`);
+  lines.push("");
 
-  const lines = [`# ${data.name}`, ""];
-  if (data.summary) lines.push("## 摘要", data.summary, "");
-  if (data.detail) lines.push("## 扫描详情", data.detail, "");
+  lines.push("## 架构概况");
   if (data.key_files.length > 0) {
-    lines.push("## 关键文件", ...data.key_files.map((file) => `- ${file}`), "");
-  }
-  if (data.extra) lines.push("## 补充说明", data.extra, "");
-  lines.push("## 现状");
-  if (data.status?.trim()) {
-    lines.push(data.status.trim(), "");
+    lines.push("- 关键文件：");
+    lines.push(...data.key_files.map((file) => `  - ${file}`));
   } else {
-    lines.push("> 建议手动补充：当前能做什么、已知问题、下一步方向", "");
+    lines.push("- 关键文件：待补充");
   }
-  lines.push(
-    "---",
-    `*更新于 ${data.updated_at}，再次调用 pcp_init 可刷新*`,
-  );
+  if (data.detail) {
+    lines.push("- 扫描摘要：");
+    lines.push(...data.detail.split("\n").map((line) => `  ${line}`));
+  } else {
+    lines.push("- 扫描摘要：待补充");
+  }
+  if (data.extra) {
+    lines.push("- 补充说明：");
+    lines.push(...data.extra.split("\n").map((line) => `  ${line}`));
+  }
+  lines.push("");
+
+  lines.push("## 版本路线图");
+  lines.push("- v0：让 PCP 在单人、单目录、OpenCode 场景中可用。");
+  lines.push("- v0.1：收口使用体验，让接手、review、follow-up 更顺。");
+  lines.push("- v0.2：增强跨工具 handoff / intake 的连续性。");
+  lines.push("- v0.3：加入更智能的语义和 hook 流程层。");
+  lines.push("");
+
+  lines.push("## 当前状态");
+  if (data.status?.trim()) {
+    lines.push(data.status.trim());
+  } else {
+    lines.push("> 建议手动补充：当前在哪个版本、主线在做什么、这一版还差什么。");
+  }
+  lines.push("");
+
+  lines.push("## 项目约束");
+  lines.push("- 正式任务必须审批后才能入队。");
+  lines.push("- Blueprint 只用于复杂任务，不是每个任务必填。");
+  lines.push("- intake 先对齐认知，不自动进入 plan 或执行。");
+  lines.push("");
+
+  lines.push("## 刷新规则");
+  lines.push("- `PROJECT.md` 是项目基线，不是流水账。");
+  lines.push("- 普通执行流不应随手改它。");
+  lines.push("- 如需更新，应先提议，再由用户同意。");
+  lines.push("");
+  lines.push("---");
+  lines.push(`*更新于 ${data.updated_at}，再次调用 pcp_init 可刷新基础扫描结果。*`);
 
   const md = lines.join("\n");
   fs.writeFileSync(path.join(pcpDir(dir), "PROJECT.md"), md);
@@ -614,6 +653,71 @@ export function readProjectMd(dir: string): string | null {
   const p = path.join(pcpDir(dir), "PROJECT.md");
   if (!fs.existsSync(p)) return null;
   return fs.readFileSync(p, "utf8");
+}
+
+function readMarkdownSection(md: string | null, heading: string): string | null {
+  if (!md) return null;
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = md.match(new RegExp(`## ${escaped}\\n([\\s\\S]*?)(?=\\n## |\\n---|\\n*$)`));
+  if (!match?.[1]) return null;
+  const value = match[1].trim();
+  return value || null;
+}
+
+function stripBulletPrefix(line: string): string {
+  return line.replace(/^\s*[-*]\s*/, "").replace(/^\s*\d+\.\s*/, "").trim();
+}
+
+function readProjectBaselineSummary(dir: string): ProjectBaselineSummary | null {
+  const projectJson = readProjectJson(dir);
+  if (projectJson) {
+    return {
+      name: projectJson.name,
+      summary: projectJson.summary,
+      detail: projectJson.detail,
+      key_files: projectJson.key_files,
+      status: projectJson.status,
+    };
+  }
+
+  const md = readProjectMd(dir);
+  if (!md) return null;
+
+  const baselineSection = readMarkdownSection(md, "项目基线");
+  const architectureSection = readMarkdownSection(md, "架构概况");
+  const statusSection = readMarkdownSection(md, "当前状态");
+
+  const summaryMatch = baselineSection?.match(/摘要：(.+)/);
+  const nameMatch = baselineSection?.match(/名称：(.+)/);
+
+  const keyFiles = architectureSection
+    ? architectureSection
+        .split("\n")
+        .filter((line) => line.trim().startsWith("-") || line.trim().startsWith("  -"))
+        .map(stripBulletPrefix)
+        .filter((line) => line && line !== "关键文件：" && !line.startsWith("扫描摘要"))
+    : [];
+
+  const detail = architectureSection
+    ? architectureSection
+        .split("\n")
+        .filter((line) => !line.includes("关键文件："))
+        .map((line) => line.replace(/^\s{2}/, ""))
+        .join("\n")
+        .trim() || null
+    : null;
+
+  const status = statusSection
+    ? statusSection.replace(/^>\s?/gm, "").trim()
+    : null;
+
+  return {
+    name: nameMatch?.[1]?.trim() ?? null,
+    summary: summaryMatch?.[1]?.trim() ?? null,
+    detail,
+    key_files: keyFiles,
+    status: status && !status.includes("建议手动补充") ? status : null,
+  };
 }
 
 export function readEventLog(dir: string): PcpEvent[] {
@@ -1860,13 +1964,8 @@ export function scanProject(dir: string): { summary: string; kind: string; detai
 
 function extractProjectStatus(projectJson: ProjectData | null, projectMd: string | null): string | null {
   if (projectJson?.status?.trim()) return projectJson.status.trim();
-  if (!projectMd) return null;
-
-  const statusMatch = projectMd.match(/## 现状\n([\s\S]*?)(?=\n## |\n---|\n*$)/);
-  if (!statusMatch?.[1]) return null;
-
-  const cleaned = statusMatch[1]
-    .replace(/^>\s?/gm, "")
+  const cleaned = readMarkdownSection(projectMd, "当前状态")
+    ?.replace(/^>\s?/gm, "")
     .trim();
   if (!cleaned || cleaned.includes("建议手动补充")) return null;
   return cleaned;
@@ -1917,7 +2016,6 @@ function hasPcpState(dir: string): boolean {
   return [
     path.join(root, "stack.json"),
     path.join(root, "events.jsonl"),
-    path.join(root, "PROJECT.json"),
     path.join(root, "PROJECT.md"),
     path.join(root, "HANDOFF.json"),
   ].some((file) => fs.existsSync(file));
@@ -1955,15 +2053,15 @@ function buildProjectSummary(dir: string): {
   has_pcp: boolean;
 } {
   const pcpPresent = hasPcpState(dir);
-  const projectJson = readProjectJson(dir);
+  const projectBaseline = readProjectBaselineSummary(dir);
   const projectContext = readProjectContext(dir);
-  if (projectJson || projectContext) {
+  if (projectBaseline || projectContext) {
     return {
-      summary: projectJson?.summary ?? projectContext ?? path.basename(dir),
+      summary: projectBaseline?.summary ?? projectContext ?? path.basename(dir),
       kind: "已接入 PCP 的项目",
-      detail: projectJson?.detail ?? null,
-      key_files: projectJson?.key_files ?? [],
-      signals: projectJson?.key_files?.slice(0, 3) ?? [],
+      detail: projectBaseline?.detail ?? null,
+      key_files: projectBaseline?.key_files ?? [],
+      signals: projectBaseline?.key_files?.slice(0, 3) ?? [],
       has_pcp: pcpPresent,
     };
   }
@@ -1990,7 +2088,7 @@ export function buildHandoffMarkdown(dir: string, options: HandoffOptions = {}):
   const stack = readStack(dir);
   const tasks = replayEvents(dir);
   const backlog = replayBacklog(dir);
-  const projectJson = readProjectJson(dir);
+  const projectBaseline = readProjectBaselineSummary(dir);
   const projectMd = readProjectMd(dir);
   const projectContext = readProjectContext(dir);
   const activeTask = stack.active_task_id ? getTask(tasks, stack.active_task_id) : null;
@@ -2006,8 +2104,8 @@ export function buildHandoffMarkdown(dir: string, options: HandoffOptions = {}):
     .slice(-max_recent_events)
     .map((event) => `- ${formatEventSummary(event)}`);
   const recentWorklog = readWorklogEntries(dir, max_worklog_entries);
-  const projectStatus = extractProjectStatus(projectJson, projectMd);
-  const keyFiles = projectJson?.key_files ?? [];
+  const projectStatus = extractProjectStatus(projectBaseline as ProjectData | null, projectMd);
+  const keyFiles = projectBaseline?.key_files ?? [];
   const lines: string[] = [
     "# PCP Handoff",
     "",
@@ -2019,9 +2117,9 @@ export function buildHandoffMarkdown(dir: string, options: HandoffOptions = {}):
   lines.push("");
 
   lines.push("## 项目概况");
-  if (projectJson?.name) lines.push(`- 项目: ${projectJson.name}`);
-  if (projectJson?.summary ?? projectContext) {
-    lines.push(`- 摘要: ${projectJson?.summary ?? projectContext ?? ""}`);
+  if (projectBaseline?.name) lines.push(`- 项目: ${projectBaseline.name}`);
+  if (projectBaseline?.summary ?? projectContext) {
+    lines.push(`- 摘要: ${projectBaseline?.summary ?? projectContext ?? ""}`);
   }
   if (projectStatus) lines.push(`- 现状: ${projectStatus}`);
   if (keyFiles.length > 0) {
@@ -2131,7 +2229,7 @@ export function buildHandoffSnapshot(dir: string, options: HandoffOptions = {}):
   const stack = readStack(dir);
   const tasks = replayEvents(dir);
   const backlog = replayBacklog(dir);
-  const projectJson = readProjectJson(dir);
+  const projectBaseline = readProjectBaselineSummary(dir);
   const projectMd = readProjectMd(dir);
   const projectContext = readProjectContext(dir);
   const mainTask = stack.active_stack[0] ? getTask(tasks, stack.active_stack[0]) : null;
@@ -2143,7 +2241,7 @@ export function buildHandoffSnapshot(dir: string, options: HandoffOptions = {}):
   const pendingBacklog = include_backlog
     ? backlog.filter((item) => item.status === "pending")
     : [];
-  const projectStatus = extractProjectStatus(projectJson, projectMd);
+  const projectStatus = extractProjectStatus(projectBaseline as ProjectData | null, projectMd);
   const recentEvents = readEventLog(dir)
     .slice(-max_recent_events)
     .map((event) => formatEventSummary(event));
@@ -2173,11 +2271,11 @@ export function buildHandoffSnapshot(dir: string, options: HandoffOptions = {}):
     audience: audience ?? null,
     focus: focus ?? null,
     project: {
-      name: projectJson?.name ?? null,
-      summary: projectJson?.summary ?? projectContext ?? null,
+      name: projectBaseline?.name ?? null,
+      summary: projectBaseline?.summary ?? projectContext ?? null,
       context: projectContext,
       status: projectStatus,
-      key_files: projectJson?.key_files ?? [],
+      key_files: projectBaseline?.key_files ?? [],
     },
     main_task: mainTask ? {
       id: mainTask.id,
