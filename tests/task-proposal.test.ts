@@ -53,6 +53,34 @@ test("approved proposal becomes a formal queued task", () => {
   assert.equal(proposal?.approved_task_id, "T001");
 });
 
+test("approved proposal preserves lightweight interface fields on the task card", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pcp-proposal-interface-"));
+
+  ensureDir(dir);
+  createTaskProposal(dir, {
+    title: "实现登录接口",
+    detail: "批准后要保留接口字段。",
+    module: "认证",
+    feature: "登录",
+    interface_name: "AuthService.login",
+    inputs: ["credentials"],
+    outputs: ["session", "error"],
+    dependencies: ["UserRepo"],
+    acceptance: ["成功返回session"],
+  });
+
+  approveTaskProposal(dir, "TP001");
+
+  const taskCard = readTaskCard(dir, "T001");
+  assert.equal(taskCard?.module, "认证");
+  assert.equal(taskCard?.feature, "登录");
+  assert.equal(taskCard?.interface_name, "AuthService.login");
+  assert.deepEqual(taskCard?.inputs, ["credentials"]);
+  assert.deepEqual(taskCard?.outputs, ["session", "error"]);
+  assert.deepEqual(taskCard?.dependencies, ["UserRepo"]);
+  assert.deepEqual(taskCard?.acceptance, ["成功返回session"]);
+});
+
 test("rejecting proposal leaves queue untouched", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pcp-proposal-reject-"));
 

@@ -76,3 +76,26 @@ test("appends compiled plan tasks to the ready queue when a task is already acti
   assert.equal(appendedCard?.created_from_plan, "P002");
   assert.equal(appendedCard?.lifecycle_status, "ready");
 });
+
+test("compiles interface-oriented task strings into lightweight task card fields", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pcp-plan-interface-"));
+
+  ensureDir(dir);
+
+  compilePlan(dir, {
+    source: "pcp_plan",
+    title: "接口化任务",
+    tasks: [
+      "模块:认证 | 功能:登录 | 接口:AuthService.login | 输入:credentials | 输出:session,error | 依赖:UserRepo,PasswordHasher | 验收:成功返回session,失败返回error",
+    ],
+  });
+
+  const card = readTaskCard(dir, "T001");
+  assert.equal(card?.module, "认证");
+  assert.equal(card?.feature, "登录");
+  assert.equal(card?.interface_name, "AuthService.login");
+  assert.deepEqual(card?.inputs, ["credentials"]);
+  assert.deepEqual(card?.outputs, ["session", "error"]);
+  assert.deepEqual(card?.dependencies, ["UserRepo", "PasswordHasher"]);
+  assert.deepEqual(card?.acceptance, ["成功返回session", "失败返回error"]);
+});

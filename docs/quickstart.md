@@ -22,6 +22,8 @@
 
 2. 把这一轮任务装进 PCP  
    用：`pcp_plan`
+   如果想把模块/功能任务做成更细粒度，可用轻接口格式：
+   `模块:认证 | 功能:登录 | 接口:AuthService.login | 输入:credentials | 输出:session,error`
 
 3. 随时看当前状态和下一步建议  
    用：`pcp_status`

@@ -223,6 +223,18 @@ export interface PlanInput {
   tasks: string[];
 }
 
+interface ParsedInterfaceTask {
+  title: string;
+  detail: string;
+  module: string | null;
+  feature: string | null;
+  interface_name: string | null;
+  inputs: string[];
+  outputs: string[];
+  dependencies: string[];
+  acceptance: string[];
+}
+
 export interface PlanRecord {
   id: string;
   source: string;
@@ -247,6 +259,13 @@ export interface TaskProposalInput {
   parent_task_id?: string | null;
   source_blueprint_id?: string | null;
   source_step_index?: number | null;
+  module?: string | null;
+  feature?: string | null;
+  interface_name?: string | null;
+  inputs?: string[];
+  outputs?: string[];
+  dependencies?: string[];
+  acceptance?: string[];
 }
 
 export interface TaskProposalRecord {
@@ -257,6 +276,13 @@ export interface TaskProposalRecord {
   parent_task_id: string | null;
   source_blueprint_id: string | null;
   source_step_index: number | null;
+  module: string | null;
+  feature: string | null;
+  interface_name: string | null;
+  inputs: string[];
+  outputs: string[];
+  dependencies: string[];
+  acceptance: string[];
   status: "proposed" | "approved" | "rejected";
   approved_task_id: string | null;
   created_at: string;
@@ -338,6 +364,12 @@ export interface TaskCard {
   type: "main" | "sub";
   title: string;
   detail: string;
+  module: string | null;
+  feature: string | null;
+  interface_name: string | null;
+  inputs: string[];
+  outputs: string[];
+  dependencies: string[];
   acceptance: string[];
   created_from_goal: string | null;
   created_from_plan: string | null;
@@ -1177,6 +1209,13 @@ export function createTaskProposal(dir: string, input: TaskProposalInput): TaskP
     parent_task_id: input.parent_task_id ?? null,
     source_blueprint_id: input.source_blueprint_id ?? null,
     source_step_index: input.source_step_index ?? null,
+    module: input.module ?? null,
+    feature: input.feature ?? null,
+    interface_name: input.interface_name ?? null,
+    inputs: input.inputs ?? [],
+    outputs: input.outputs ?? [],
+    dependencies: input.dependencies ?? [],
+    acceptance: input.acceptance ?? [],
     status: "proposed",
     approved_task_id: null,
     created_at: now,
@@ -1559,6 +1598,19 @@ export function approveTaskProposal(
   });
   writeTaskProposalIndex(dir, listTaskProposals(dir).map((item) => item.id));
   writeStack(dir, stack);
+  const taskCard = readTaskCard(dir, taskId);
+  if (taskCard) {
+    writeTaskCard(dir, {
+      ...taskCard,
+      module: proposal.module,
+      feature: proposal.feature,
+      interface_name: proposal.interface_name,
+      inputs: [...proposal.inputs],
+      outputs: [...proposal.outputs],
+      dependencies: [...proposal.dependencies],
+      acceptance: proposal.acceptance.length > 0 ? [...proposal.acceptance] : taskCard.acceptance,
+    });
+  }
 
   return { proposal_id: proposalId, task_id: taskId };
 }
@@ -1586,6 +1638,59 @@ function deriveLifecycleStatus(task: Task, stack: Stack): TaskCardLifecycleStatu
   if (stack.active_stack.includes(task.id)) return "doing";
   if (stack.ready_tasks.some((queued) => queued.id === task.id)) return "ready";
   return "draft";
+}
+
+function parseInterfaceTask(rawTask: string): ParsedInterfaceTask {
+  const trimmed = rawTask.trim();
+  const parsed: ParsedInterfaceTask = {
+    title: trimmed,
+    detail: "",
+    module: null,
+    feature: null,
+    interface_name: null,
+    inputs: [],
+    outputs: [],
+    dependencies: [],
+    acceptance: [],
+  };
+
+  if (!trimmed.includes("模块:") && !trimmed.includes("功能:") && !trimmed.includes("接口:")) {
+    return parsed;
+  }
+
+  const segments = trimmed
+    .split("|")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    const [rawKey, ...rest] = segment.split(":");
+    const key = rawKey?.trim();
+    const value = rest.join(":").trim();
+    if (!key || !value) continue;
+    const values = value.split(",").map((item) => item.trim()).filter(Boolean);
+
+    if (key === "模块") parsed.module = value;
+    else if (key === "功能") parsed.feature = value;
+    else if (key === "接口") parsed.interface_name = value;
+    else if (key === "输入") parsed.inputs = values;
+    else if (key === "输出") parsed.outputs = values;
+    else if (key === "依赖") parsed.dependencies = values;
+    else if (key === "验收") parsed.acceptance = values;
+  }
+
+  const titleParts = [parsed.module, parsed.feature, parsed.interface_name].filter(Boolean);
+  if (titleParts.length > 0) {
+    parsed.title = titleParts.join(" / ");
+  }
+
+  const detailParts: string[] = [];
+  if (parsed.inputs.length > 0) detailParts.push(`输入：${parsed.inputs.join(", ")}`);
+  if (parsed.outputs.length > 0) detailParts.push(`输出：${parsed.outputs.join(", ")}`);
+  if (parsed.dependencies.length > 0) detailParts.push(`依赖：${parsed.dependencies.join(", ")}`);
+  parsed.detail = detailParts.join("；");
+
+  return parsed;
 }
 
 function deriveReviewStatus(decision: TaskReviewDecision): TaskCardReviewStatus {
@@ -1734,10 +1839,11 @@ export function compilePlan(
   const planId = `P${String(stack.plan_next_id ?? 1).padStart(3, "0")}`;
   const created: { id: string; title: string }[] = [];
 
-  for (const title of input.tasks) {
+  for (const rawTask of input.tasks) {
+    const parsedTask = parseInterfaceTask(rawTask);
     const id = `T${String(stack.next_id).padStart(3, "0")}`;
-    appendEvent(dir, { e: "created", id, type: "main", title, ts: Date.now() });
-    created.push({ id, title });
+    appendEvent(dir, { e: "created", id, type: "main", title: parsedTask.title, ts: Date.now() });
+    created.push({ id, title: parsedTask.title });
     stack.next_id++;
   }
 
@@ -1773,6 +1879,23 @@ export function compilePlan(
   writePlanIndex(dir, listPlans(dir).map((item) => item.id));
   stack.plan_next_id = (stack.plan_next_id ?? 1) + 1;
   writeStack(dir, stack);
+  for (let index = 0; index < created.length; index++) {
+    const parsedTask = parseInterfaceTask(input.tasks[index] ?? created[index]!.title);
+    const taskCard = readTaskCard(dir, created[index]!.id);
+    if (!taskCard) continue;
+    writeTaskCard(dir, {
+      ...taskCard,
+      title: parsedTask.title,
+      detail: parsedTask.detail || taskCard.detail,
+      module: parsedTask.module,
+      feature: parsedTask.feature,
+      interface_name: parsedTask.interface_name,
+      inputs: parsedTask.inputs,
+      outputs: parsedTask.outputs,
+      dependencies: parsedTask.dependencies,
+      acceptance: parsedTask.acceptance.length > 0 ? parsedTask.acceptance : taskCard.acceptance,
+    });
+  }
 
   return { plan, created };
 }
@@ -1828,6 +1951,12 @@ export function reconcileTaskCards(dir: string): TaskCard[] {
       type: task.type,
       title: existingCard?.title ?? task.title,
       detail: existingCard?.detail ?? "",
+      module: existingCard?.module ?? null,
+      feature: existingCard?.feature ?? null,
+      interface_name: existingCard?.interface_name ?? null,
+      inputs: existingCard?.inputs ?? [],
+      outputs: existingCard?.outputs ?? [],
+      dependencies: existingCard?.dependencies ?? [],
       acceptance: existingCard?.acceptance ?? [],
       created_from_goal: existingCard?.created_from_goal ?? null,
       created_from_plan: existingCard?.created_from_plan ?? taskPlanMap.get(task.id) ?? null,

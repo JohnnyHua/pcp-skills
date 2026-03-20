@@ -36,3 +36,4 @@
 - 2026-03-18 09:18 Added numbered intake follow-up menus so onboarding can stay lightweight by default while still letting users inspect project/worklog/backlog/concern/changelog through simple `1/2/3/4/5/6` choices.
 - 2026-03-18 09:34 Wrote the first `PROJECT.md` baseline design so PCP can later read a protected project baseline containing project purpose, architecture, version roadmap, current state, and constraints.
 - 2026-03-18 09:52 Implemented the first `PROJECT.md` baseline path so `pcp_init` now generates only Markdown, intake can reuse that baseline, and ordinary execution flow still treats it as read-mostly project context.
+- 2026-03-20 10:08 Added lightweight interface-oriented task fields so plan/proposal tasks can carry `模块 / 功能 / 接口 / 输入 / 输出 / 依赖 / 验收` without introducing a heavier decomposition system.

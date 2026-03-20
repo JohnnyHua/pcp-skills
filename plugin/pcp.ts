@@ -358,7 +358,8 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
           "如果当前有任务在执行，新任务追加到队列末尾。" +
           "用户给出 todolist 或计划文档时，先解析为有序任务列表再调用此工具。" +
           "【任务质量标准】每个任务标题应具体可验证：含改动文件/目标、预期结果或验收条件，避免泛化描述。" +
-          "例：'src/fetcher.py: 为 china_ai 限定信源列表+关键词白名单（输出匹配样本3条）' 优于 '优化信源过滤'。",
+          "例：'src/fetcher.py: 为 china_ai 限定信源列表+关键词白名单（输出匹配样本3条）' 优于 '优化信源过滤'。" +
+          "如需接口化任务，可使用字符串格式：'模块:认证 | 功能:登录 | 接口:AuthService.login | 输入:credentials | 输出:session,error'。",
         args: {
           tasks: tool.schema
             .array(tool.schema.string())
@@ -940,15 +941,39 @@ export const PCPPlugin: Plugin = async ({ directory, client }) => {
         args: {
           title: tool.schema.string().describe("候选任务标题"),
           detail: tool.schema.string().describe("提议原因或说明"),
+          module: tool.schema.string().optional().describe("可选：模块名，如 认证"),
+          feature: tool.schema.string().optional().describe("可选：功能名，如 登录"),
+          interface_name: tool.schema.string().optional().describe("可选：接口名，如 AuthService.login"),
+          inputs: tool.schema.array(tool.schema.string()).optional().describe("可选：输入列表"),
+          outputs: tool.schema.array(tool.schema.string()).optional().describe("可选：输出列表"),
+          dependencies: tool.schema.array(tool.schema.string()).optional().describe("可选：依赖列表"),
+          acceptance: tool.schema.array(tool.schema.string()).optional().describe("可选：验收列表"),
         },
-        async execute({ title, detail }, context) {
+        async execute({ title, detail, module, feature, interface_name, inputs = [], outputs = [], dependencies = [], acceptance = [] }, context) {
           const dir = context.directory;
           ensureDir(dir);
-          const proposal = createTaskProposal(dir, { title, detail });
+          const proposal = createTaskProposal(dir, {
+            title,
+            detail,
+            module,
+            feature,
+            interface_name,
+            inputs,
+            outputs,
+            dependencies,
+            acceptance,
+          });
           appendWorklog(dir, `💡 [${proposal.id}] 提议任务: ${proposal.title}`);
           return [
             `💡 已记录任务提议：${proposal.id}`,
             `标题: ${proposal.title}`,
+            ...(proposal.module || proposal.feature || proposal.interface_name
+              ? [
+                  `模块: ${proposal.module ?? "未填"}`,
+                  `功能: ${proposal.feature ?? "未填"}`,
+                  `接口: ${proposal.interface_name ?? "未填"}`,
+                ]
+              : []),
             `说明: ${proposal.detail}`,
             "",
             `这不是正式任务。若要加入队列，请调用 pcp_approve_task_proposal。`,

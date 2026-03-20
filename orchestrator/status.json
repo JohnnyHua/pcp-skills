@@ -1,8 +1,8 @@
 {
-  "current_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-IMPLEMENTATION",
-  "last_completed_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-IMPLEMENTATION",
-  "pending_sprint": "SPRINT-2026-03-18-PROJECT-BASELINE-REFRESH-DESIGN",
-  "pending_goal": "Design how PROJECT.md should be refreshed through explicit user-approved updates rather than ordinary execution flow edits.",
-  "last_run_at": "2026-03-18T09:52:00+01:00",
-  "notes": "PROJECT.md is now the primary project baseline artifact. PCP intake can read it directly, but refresh/update flow is still undefined and should be designed next."
+  "current_sprint": "SPRINT-2026-03-20-INTERFACE-TASK-MINIMUM",
+  "last_completed_sprint": "SPRINT-2026-03-20-INTERFACE-TASK-MINIMUM",
+  "pending_sprint": "SPRINT-2026-03-20-REAL-WORLD-USAGE",
+  "pending_goal": "Use the current PCP trunk in real development to validate task granularity, intake flow, and approval ergonomics before adding more abstraction.",
+  "last_run_at": "2026-03-20T10:08:00+01:00",
+  "notes": "PCP now supports lightweight interface-oriented task fields. The next step should be real usage validation rather than continued feature piling."
 }

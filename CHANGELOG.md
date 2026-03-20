@@ -88,3 +88,4 @@
 - Added numbered intake follow-up navigation so `pcp_intake` now presents simple menu choices and `pcp_intake_followup` can expand project/worklog/backlog/concern/changelog sections via `1 / 2 / 3 / 4 / 5 / 6` instead of requiring users to remember section names.
 - Added [docs/plans/2026-03-18-project-baseline-design.md](/Users/hqc/clawd/pcp/publish/docs/plans/2026-03-18-project-baseline-design.md) to define a first-pass `PROJECT.md` baseline that will eventually hold project purpose, architecture, version roadmap, current state, and protected update rules.
 - Updated the project baseline flow so `pcp_init` now generates `PROJECT.md` as the primary baseline artifact, intake can read it directly, and README references no longer describe a parallel `PROJECT.json` baseline.
+- Added lightweight interface-oriented task support so plan and proposal tasks can preserve `模块 / 功能 / 接口 / 输入 / 输出 / 依赖 / 验收` fields for finer-grained, more modular task execution.
