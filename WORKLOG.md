@@ -37,3 +37,6 @@
 - 2026-03-18 09:34 Wrote the first `PROJECT.md` baseline design so PCP can later read a protected project baseline containing project purpose, architecture, version roadmap, current state, and constraints.
 - 2026-03-18 09:52 Implemented the first `PROJECT.md` baseline path so `pcp_init` now generates only Markdown, intake can reuse that baseline, and ordinary execution flow still treats it as read-mostly project context.
 - 2026-03-20 10:08 Added lightweight interface-oriented task fields so plan/proposal tasks can carry `模块 / 功能 / 接口 / 输入 / 输出 / 依赖 / 验收` without introducing a heavier decomposition system.
+- 2026-03-26 12:00 Entered PCP sunset planning: concluded the runtime is not part of the daily workflow, documented shrink-down strategy, and redirected value preservation toward methodology, `PROJECT.md`, and host-tool alternatives such as Oh My OpenCode.
+- 2026-03-26 12:20 Repositioned the repository so README and quickstart now present PCP as a sunset/archived experiment and methodology reference instead of an actively expanding runtime product.
+- 2026-03-26 12:35 Removed the unfinished `task_kind` runtime experiment from the active branch so the sunset work stays focused on documentation, positioning, and methodology preservation rather than half-finished code.

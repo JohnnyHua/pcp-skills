@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- docs: add PCP sunset decision and document the shift from runtime expansion to methodology/baseline preservation
+- docs: reposition README and quickstart around PCP sunset status and host-tool replacements
+- chore: remove unfinished `task_kind` runtime experiment from the sunset branch
+
 - Added `AGENTS.md` with repository-specific contributor guidance for the PCP plugin, bundled skills, manual validation flow, and PR expectations.
 - Added minimal local tooling with `package.json`, `tsconfig.json`, `npm run typecheck`, `npm test`, and `npm run check`.
 - Added `pcp_handoff`, which generates `.opencode/pcp/HANDOFF.md` from current PCP tasks, queue, backlog, project context, and worklog.

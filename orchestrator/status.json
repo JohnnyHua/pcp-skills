@@ -1,8 +1,8 @@
 {
-  "current_sprint": "SPRINT-2026-03-20-INTERFACE-TASK-MINIMUM",
-  "last_completed_sprint": "SPRINT-2026-03-20-INTERFACE-TASK-MINIMUM",
-  "pending_sprint": "SPRINT-2026-03-20-REAL-WORLD-USAGE",
-  "pending_goal": "Use the current PCP trunk in real development to validate task granularity, intake flow, and approval ergonomics before adding more abstraction.",
-  "last_run_at": "2026-03-20T10:08:00+01:00",
-  "notes": "PCP now supports lightweight interface-oriented task fields. The next step should be real usage validation rather than continued feature piling."
+  "current_sprint": "SPRINT-2026-03-26-PCP-SUNSET-REPOSITION",
+  "last_completed_sprint": "SPRINT-2026-03-26-PCP-SUNSET-REPOSITION",
+  "pending_sprint": "SPRINT-2026-03-26-PCP-SUNSET-FINALIZE",
+  "pending_goal": "Commit and push the sunset branch, then decide whether one final top-level archive note is needed or whether the repository can stop here.",
+  "last_run_at": "2026-03-26T12:35:00+01:00",
+  "notes": "PCP has been repositioned as an archived experiment and methodology/reference repository. Unfinished task_kind runtime work was removed from the active branch instead of being carried forward."
 }

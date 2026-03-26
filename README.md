@@ -1,6 +1,57 @@
 # PCP Skills for OpenCode
 
-> A workflow control layer for AI coding agents. Keep the main task on track, collect side requests safely, and hand work off across tools without losing context.
+> An agent-architecture experiment now entering shrink-down mode. This repository is more useful as workflow methodology, project-baseline design, and exploration notes than as a runtime product to keep expanding.
+
+## Project Status
+
+**PCP (Progress Control Plane) is no longer being advanced as a primary standalone runtime product.**
+
+Why:
+
+- In real day-to-day use, `ohmyopencode` already covers most of the practical plan / execute workflow value
+- Many rules that PCP tried to enforce fit better in `AGENTS.md`, `PROJECT.md`, and lightweight team/project conventions
+- The most durable value here is now:
+  - agent workflow exploration
+  - project-baseline design
+  - module -> feature -> interface task decomposition
+  - clearer boundaries for handoff / intake / backlog / concern
+
+See:
+
+- [PCP Sunset Decision](docs/plans/2026-03-26-pcp-sunset-design.md)
+
+## How To Read This Repository Now
+
+This repository is now better treated as:
+
+1. **An archived experiment**
+   - how an agent control-plane idea was explored
+2. **A methodology repository**
+   - what development rules and task decomposition patterns proved useful
+3. **A project-baseline reference**
+   - `PROJECT.md`, version baseline, and long-lived project constraints
+
+Rather than as a runtime product that should continue to grow.
+
+## Replacements
+
+If your goal is simply a practical daily AI coding workflow, the better path now is:
+
+- **Oh My OpenCode**
+  - currently the closest full replacement for PCP in everyday use
+  - already covers plan builder / plan executor style workflows
+- **Host tools such as OpenCode, Claude Code, and Codex**
+  - combined with `AGENTS.md` and `PROJECT.md`, they already cover much of the real workflow surface
+
+In short:
+
+> PCP is now more valuable as a record of ideas and working patterns than as a product to keep shipping.
+
+## Historical Positioning
+
+The sections below are kept as historical context: what PCP was trying to solve, and which parts remain conceptually useful.
+
+---
 
 **PCP (Progress Control Plane)** is a workflow layer for AI coding agents. It helps an AI stay on the current task, collect side requests without losing focus, and hand work off cleanly when you switch tools.
 
@@ -52,11 +103,15 @@ This document splits PCP into `v0 / v0.1 / v0.2 / v0.3` so it is easier to tell:
 
 ## Quickstart
 
+> Historical reference only. This is kept for people reviewing the experiment, not because PCP is still the recommended default workflow.
+
 If PCP is already installed and you only want the shortest day-to-day flow, start here:
 
 - [PCP Quickstart](docs/quickstart.md)
 
 ## Install
+
+> Historical reference only. This repository is no longer recommended as a new primary runtime integration.
 
 ```bash
 npx skills add JohnnyHua/pcp-skills
